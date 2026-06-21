@@ -1,6 +1,11 @@
-"""``scitex-hpc reservations`` group — book / list / get / exec / refresh / attach / cancel.
+"""``scitex-hpc lease`` group — book / list / get / exec / refresh / attach / cancel.
 
-``cancel`` is the canonical verb for tearing down a reservation
+``lease`` is the primary, documented command name. ``reservations`` is
+kept as a **deprecated alias** that delegates to the same subcommands
+(see :class:`_DeprecatedAliasGroup` / :data:`reservations`) so existing
+callers keep working; it prints a one-line deprecation notice to stderr.
+
+``cancel`` is the canonical verb for tearing down a lease
 (``scancel`` + lease cleanup); the legacy ``release`` spelling is kept
 as a hidden alias for one minor-version cycle.
 """
@@ -29,12 +34,17 @@ def _serialize(res: Reservation) -> dict:
     }
 
 
-@click.group("reservations")
-def reservations() -> None:
-    """Persistent SLURM allocations (book once, exec many)."""
+@click.group("lease")
+def lease() -> None:
+    """Persistent SLURM allocations (book once, exec many).
+
+    \b
+    Note: the legacy ``reservations`` command is a deprecated alias for
+    ``lease`` and forwards to these same subcommands.
+    """
 
 
-@reservations.command("book")
+@lease.command("book")
 @click.argument("name")
 @click.option(
     "--host",
@@ -141,28 +151,28 @@ def book_cmd(
 
     \b
       # CPU — cascade partition (64 cores / 256 GB / 7 days)
-      $ scitex-hpc reservations book spartan-cpu-64-cores-256-ram \\
+      $ scitex-hpc lease book spartan-cpu-64-cores-256-ram \\
           --partition cascade \\
           --cpus 64 --mem 256G --time 7-0 \\
           --account punim2354 --qos publiccpu --persistent
 
     \b
       # CPU — sapphire partition (64 cores / 128 GB / 7 days)
-      $ scitex-hpc reservations book spartan-cpu-64-cores-128-ram \\
+      $ scitex-hpc lease book spartan-cpu-64-cores-128-ram \\
           --partition sapphire \\
           --cpus 64 --mem 128G --time 7-0 \\
           --account punim2354 --qos publiccpu --persistent
 
     \b
       # GPU — 1× H100 (16 cores / 128 GB / 7 days)
-      $ scitex-hpc reservations book spartan-gpu-16-cores-128-ram-80-vram-h100 \\
+      $ scitex-hpc lease book spartan-gpu-16-cores-128-ram-80-vram-h100 \\
           --partition gpu-h100 \\
           --cpus 16 --mem 128G --gpus H100:1 --time 7-0 \\
           --account punim2354 --qos feit --persistent
 
     \b
       # GPU — 1× A100 (8 cores / 128 GB / 7 days)
-      $ scitex-hpc reservations book spartan-gpu-8-cores-128-ram-80-vram-a100 \\
+      $ scitex-hpc lease book spartan-gpu-8-cores-128-ram-80-vram-a100 \\
           --partition gpu-a100 \\
           --cpus 8 --mem 128G --gpus A100:1 --time 7-0 \\
           --account punim2354 --qos publicgpu --persistent
@@ -230,15 +240,15 @@ def book_cmd(
         click.echo(f"booked: id={res.id} job={res.job_id} node={res.node}")
 
 
-@reservations.command("list")
+@lease.command("list")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
 def list_cmd(as_json):
     """List active reservations.
 
     \b
     Example:
-      $ scitex-hpc reservations list
-      $ scitex-hpc reservations list --json
+      $ scitex-hpc lease list
+      $ scitex-hpc lease list --json
     """
     rows = Reservation.list()
     if as_json:
@@ -255,7 +265,7 @@ def list_cmd(as_json):
         )
 
 
-@reservations.command("get")
+@lease.command("get")
 @click.argument("name")
 @click.option("--host", default=None)
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
@@ -265,8 +275,8 @@ def get_cmd(ctx, name, host, as_json):
 
     \b
     Example:
-      $ scitex-hpc reservations get dev-pool
-      $ scitex-hpc reservations get dev-pool --json
+      $ scitex-hpc lease get dev-pool
+      $ scitex-hpc lease get dev-pool --json
     """
     res = Reservation.get(name, host=host)
     if res is None:
@@ -275,7 +285,7 @@ def get_cmd(ctx, name, host, as_json):
     click.echo(_json.dumps(_serialize(res), indent=2))
 
 
-@reservations.command(
+@lease.command(
     "exec",
     context_settings={
         "ignore_unknown_options": True,
@@ -293,8 +303,8 @@ def exec_cmd(ctx, name, command, host, dry_run, yes):
 
     \b
     Example:
-      $ scitex-hpc reservations exec dev-pool 'hostname'
-      $ scitex-hpc reservations exec dev-pool 'python -m pytest'
+      $ scitex-hpc lease exec dev-pool 'hostname'
+      $ scitex-hpc lease exec dev-pool 'python -m pytest'
     """
     del yes
     res = Reservation.require(name, host=host)
@@ -307,7 +317,7 @@ def exec_cmd(ctx, name, command, host, dry_run, yes):
     ctx.exit(out.returncode)
 
 
-@reservations.command("refresh")
+@lease.command("refresh")
 @click.argument("name")
 @click.option("--host", default=None)
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
@@ -317,8 +327,8 @@ def refresh_cmd(ctx, name, host, as_json):
 
     \b
     Example:
-      $ scitex-hpc reservations refresh dev-pool
-      $ scitex-hpc reservations refresh dev-pool --json
+      $ scitex-hpc lease refresh dev-pool
+      $ scitex-hpc lease refresh dev-pool --json
     """
     res = Reservation.require(name, host=host)
     res.refresh()
@@ -335,7 +345,7 @@ def refresh_cmd(ctx, name, host, as_json):
         ctx.exit(2)
 
 
-@reservations.command("attach")
+@lease.command("attach")
 @click.argument("name")
 @click.option("--host", default=None)
 @click.option("--shell", default="bash")
@@ -345,8 +355,8 @@ def attach_cmd(ctx, name, host, shell):
 
     \b
     Example:
-      $ scitex-hpc reservations attach dev-pool
-      $ scitex-hpc reservations attach dev-pool --shell zsh
+      $ scitex-hpc lease attach dev-pool
+      $ scitex-hpc lease attach dev-pool --shell zsh
     """
     res = Reservation.require(name, host=host)
     rc = res.attach(cmd=shell, pty=True)
@@ -363,7 +373,7 @@ def _do_cancel(name, host, missing_ok, ctx):
     ctx.exit(0 if ok else 1)
 
 
-@reservations.command("cancel")
+@lease.command("cancel")
 @click.argument("name")
 @click.option("--host", default=None)
 @click.option(
@@ -379,8 +389,8 @@ def cancel_cmd(ctx, name, host, missing_ok, dry_run, yes):
 
     \b
     Example:
-      $ scitex-hpc reservations cancel dev-pool
-      $ scitex-hpc reservations cancel dev-pool --no-missing-ok
+      $ scitex-hpc lease cancel dev-pool
+      $ scitex-hpc lease cancel dev-pool --no-missing-ok
     """
     del yes
     if dry_run:
@@ -389,11 +399,78 @@ def cancel_cmd(ctx, name, host, missing_ok, dry_run, yes):
     _do_cancel(name, host, missing_ok, ctx)
 
 
-@reservations.command("release", hidden=True)
+@lease.command("release", hidden=True)
 @click.argument("name")
 @click.option("--host", default=None)
 @click.option("--missing-ok/--no-missing-ok", default=True)
 @click.pass_context
 def release_cmd(ctx, name, host, missing_ok):
-    """(deprecated alias) Use ``reservations cancel`` instead."""
+    """(deprecated alias) Use ``lease cancel`` instead."""
     _do_cancel(name, host, missing_ok, ctx)
+
+
+# ---------------------------------------------------------------------------
+# Deprecated alias: ``scitex-hpc reservations`` → ``scitex-hpc lease``
+# ---------------------------------------------------------------------------
+
+_DEPRECATION_NOTICE = (
+    "warning: 'scitex-hpc reservations' is deprecated; use 'scitex-hpc lease' instead."
+)
+
+
+class _DeprecatedAliasGroup(click.Group):
+    """Thin alias group that forwards to another (target) group.
+
+    DRY by construction: it does not own any commands. Both
+    ``list_commands`` and ``get_command`` delegate to ``self.target``,
+    so the alias always exposes exactly the same subcommands as the
+    primary group with zero duplicated command bodies. A one-line
+    deprecation notice is emitted to stderr when the alias is used —
+    including for ``--help`` and the no-subcommand case — without
+    altering behavior or exit codes.
+
+    The notice is keyed to the per-invocation click ``Context`` (not to
+    the long-lived group instance) so every distinct CLI invocation
+    warns exactly once: ``get_help`` and ``invoke`` are mutually
+    exclusive within a single run, and the context flag guards against
+    the rare double-call.
+    """
+
+    def __init__(self, *args, target: click.Group, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.target = target
+
+    @staticmethod
+    def _warn_once(ctx: click.Context) -> None:
+        root = ctx.find_root()
+        if not getattr(root, "_reservations_alias_warned", False):
+            root._reservations_alias_warned = True
+            click.echo(_DEPRECATION_NOTICE, err=True)
+
+    def list_commands(self, ctx):
+        return self.target.list_commands(ctx)
+
+    def get_command(self, ctx, cmd_name):
+        return self.target.get_command(ctx, cmd_name)
+
+    def get_help(self, ctx):
+        # Fires for ``reservations --help`` and bare ``reservations``.
+        self._warn_once(ctx)
+        return super().get_help(ctx)
+
+    def invoke(self, ctx):
+        # Fires for ``reservations <subcommand> ...``.
+        self._warn_once(ctx)
+        return super().invoke(ctx)
+
+
+reservations = _DeprecatedAliasGroup(
+    name="reservations",
+    target=lease,
+    hidden=True,
+    help=(
+        "(deprecated alias) Use 'scitex-hpc lease' instead. Forwards to "
+        "the same book / list / get / exec / refresh / attach / cancel "
+        "subcommands."
+    ),
+)

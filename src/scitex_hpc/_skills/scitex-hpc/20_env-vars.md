@@ -51,7 +51,7 @@ account: punim2354
 qos: publiccpu
 ```
 
-After this, every `scitex_hpc.{srun,sbatch}` and `scitex-hpc reservations
+After this, every `scitex_hpc.{srun,sbatch}` and `scitex-hpc lease
 book` call inherits these — you only need to pass `--gpus` (or anything
 else workload-specific) on the command line.
 

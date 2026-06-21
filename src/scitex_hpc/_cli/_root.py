@@ -23,7 +23,7 @@ PKG = "scitex-hpc"
 
 
 COMMAND_CATEGORIES = [
-    ("Reservations", ["reservations"]),
+    ("Leases", ["lease"]),
     ("Introspection", ["list-python-apis", "mcp", "skills"]),
     ("Shell", ["install-shell-completion", "print-shell-completion"]),
 ]
@@ -68,6 +68,10 @@ def _show_recursive_help(ctx: click.Context) -> None:
     if isinstance(group, click.Group):
         for name in sorted(group.list_commands(ctx)):
             cmd = group.get_command(ctx, name)
+            # Skip hidden commands (e.g. the deprecated `reservations`
+            # alias) so recursive help documents each command once.
+            if cmd is None or cmd.hidden:
+                continue
             sub_ctx = click.Context(cmd, parent=ctx, info_name=name)
             click.echo("=" * 60)
             click.echo(f"Command: {name}")
@@ -126,10 +130,14 @@ def cli(ctx: click.Context, help_recursive: bool, as_json: bool) -> None:
 from ._apis import list_python_apis as _list_python_apis  # noqa: E402
 from ._completion import attach_shell_completion  # noqa: E402
 from ._mcp_commands import mcp_group as _mcp_group  # noqa: E402
-from ._reservations import reservations as _reservations_grp  # noqa: E402
+from ._reservations import lease as _lease_grp  # noqa: E402
+from ._reservations import reservations as _reservations_alias  # noqa: E402
 from ._skills import skills_group as _skills_group  # noqa: E402
 
-cli.add_command(_reservations_grp)
+cli.add_command(_lease_grp)
+# Deprecated alias — same subcommands, emits a stderr notice (hidden
+# from --help so `lease` is the single documented name).
+cli.add_command(_reservations_alias)
 cli.add_command(_list_python_apis)
 cli.add_command(_mcp_group)
 cli.add_command(_skills_group)

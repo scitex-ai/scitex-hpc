@@ -20,6 +20,14 @@ follows [SemVer](https://semver.org/).
   surface.
 
 ### Changed
+- **Renamed the `reservations` CLI command group to `lease`** (shorter,
+  now the primary/documented name). All subcommands are unchanged:
+  `book` / `list` / `get` / `exec` / `refresh` / `attach` / `cancel`.
+  `reservations` is kept as a **deprecated alias** that forwards to the
+  exact same command objects (no duplicated logic) and prints a one-line
+  deprecation notice to stderr — so existing `scitex-hpc reservations …`
+  callers keep working with identical behavior and exit codes. Migrate
+  to `scitex-hpc lease …` at your convenience.
 - `reservations book --host` is no longer `required=True` at the
   Click layer. The package's `JobConfig.resolve("host")` cascade
   (env `SCITEX_HPC_HOST` → `~/.scitex/hpc/config.yaml`) now fills

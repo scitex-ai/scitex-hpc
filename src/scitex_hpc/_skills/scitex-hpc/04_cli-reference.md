@@ -1,7 +1,7 @@
 ---
 description: |
   [TOPIC] CLI Reference
-  [DETAILS] scitex-hpc CLI subcommand catalog — `reservations` book/list/get/exec/refresh/attach/cancel; `mcp` start/doctor/list-tools/install; `skills` list/get/install; `install-shell-completion` / `print-shell-completion` for tab completion; introspection via `list-python-apis` and `mcp list-tools -v|-vv|-vvv`. Universal flags (-V/-h/--help-recursive/--json) and per-verb pass-throughs (--dry-run / -y / --gpus). Read this when wiring scitex-hpc into a workflow or scripting around the CLI.
+  [DETAILS] scitex-hpc CLI subcommand catalog — `lease` book/list/get/exec/refresh/attach/cancel (the `reservations` group is a deprecated alias); `mcp` start/doctor/list-tools/install; `skills` list/get/install; `install-shell-completion` / `print-shell-completion` for tab completion; introspection via `list-python-apis` and `mcp list-tools -v|-vv|-vvv`. Universal flags (-V/-h/--help-recursive/--json) and per-verb pass-throughs (--dry-run / -y / --gpus). Read this when wiring scitex-hpc into a workflow or scripting around the CLI.
 tags: [scitex-hpc-cli-reference, scitex-hpc, scitex-package]
 ---
 
@@ -25,21 +25,26 @@ Universal options at every level (per `general/03_interface_02_cli/08`):
 | `--help-recursive` | Recursive help dump (every subcommand) |
 | `--json` | Emit structured JSON output (propagates to subcommands) |
 
-## Reservations (the headline workflow)
+## Leases (the headline workflow)
 
 Book a SLURM allocation once, `exec` many commands inside it. Every
-reservation is a long-lived blocker job (`tail -f /dev/null` by default)
+lease is a long-lived blocker job (`tail -f /dev/null` by default)
 so the lease and queue position survive across operator workflows.
+
+> **Deprecated alias:** `reservations` forwards to `lease` (same
+> subcommands) and prints a one-line deprecation notice to stderr.
+> Use `lease` in new scripts; existing `scitex-hpc reservations …`
+> callers keep working unchanged.
 
 | Verb | Purpose |
 |---|---|
-| `reservations book NAME` | Submit a hold-job and (optionally) wait for RUNNING |
-| `reservations list` | List active reservations (lease-file view) |
-| `reservations get NAME` | One reservation as JSON |
-| `reservations exec NAME 'CMD'` | Run `CMD` inside the allocation (returns stdout/stderr/exit) |
-| `reservations refresh NAME` | Re-discover `job_id` via `squeue --name=...` (after walltime resubmit, or after a `book` poll-timeout) |
-| `reservations attach NAME` | Open an interactive shell on the compute node |
-| `reservations cancel NAME` | `scancel` + clear lease state |
+| `lease book NAME` | Submit a hold-job and (optionally) wait for RUNNING |
+| `lease list` | List active leases (lease-file view) |
+| `lease get NAME` | One lease as JSON |
+| `lease exec NAME 'CMD'` | Run `CMD` inside the allocation (returns stdout/stderr/exit) |
+| `lease refresh NAME` | Re-discover `job_id` via `squeue --name=...` (after walltime resubmit, or after a `book` poll-timeout) |
+| `lease attach NAME` | Open an interactive shell on the compute node |
+| `lease cancel NAME` | `scancel` + clear lease state |
 
 ### `book` flags
 
@@ -69,11 +74,10 @@ NAME                          (positional) lease label
 
 If `--poll-timeout` expires while the SLURM job is still PENDING, `book`
 **saves the lease and returns** with `node = null`. The SLURM job stays
-queued. Later, run `scitex-hpc reservations refresh NAME` to fill in
-`node` once SLURM schedules it. Tear down only via `reservations
-cancel`.
+queued. Later, run `scitex-hpc lease refresh NAME` to fill in
+`node` once SLURM schedules it. Tear down only via `lease cancel`.
 
-Rationale: reservations are intentionally idle blockers so an operator
+Rationale: leases are intentionally idle blockers so an operator
 can `exec` workloads on demand. An auto-scancel on poll timeout would
 silently undo the operator's queue position on a busy partition — and
 makes the CLI dangerous for agents that retry.
@@ -122,5 +126,5 @@ stdout if you'd rather wire it in by hand.
 ## See also
 
 - `general/03_interface_02_cli/` — universal CLI conventions, banned leaves, audit rules.
-- `[11_reservations-api.md](11_reservations-api.md)` — programmatic Python API for reservations.
+- `[11_reservations-api.md](11_reservations-api.md)` — programmatic Python API for leases.
 - `[20_env-vars.md](20_env-vars.md)` — `SCITEX_HPC_*` environment overrides that match every flag above.

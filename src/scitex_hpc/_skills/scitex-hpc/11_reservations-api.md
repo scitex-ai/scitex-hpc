@@ -37,15 +37,18 @@ res.release()                               # scancel + clear state
 
 ## CLI equivalent
 
+`lease` is the primary command name; `reservations` remains as a
+deprecated alias (same subcommands, prints a one-line stderr notice).
+
 ```bash
-scitex-hpc reservations book dev-pool --host spartan --cpus 8 --mem 32G \
+scitex-hpc lease book dev-pool --host spartan --cpus 8 --mem 32G \
     --time 7-0 --tmux-server sac --persistent
-scitex-hpc reservations book gpu-l40s --partition gpu-l40s --gpus 1 \
+scitex-hpc lease book gpu-l40s --partition gpu-l40s --gpus 1 \
     --cpus 16 --mem 256G --time 7-0 --account punim2354 --persistent
-scitex-hpc reservations list
-scitex-hpc reservations exec dev-pool 'hostname'
-scitex-hpc reservations attach dev-pool
-scitex-hpc reservations cancel dev-pool         # canonical teardown verb
+scitex-hpc lease list
+scitex-hpc lease exec dev-pool 'hostname'
+scitex-hpc lease attach dev-pool
+scitex-hpc lease cancel dev-pool         # canonical teardown verb
 ```
 
 ## `book` never auto-scancels
@@ -53,9 +56,9 @@ scitex-hpc reservations cancel dev-pool         # canonical teardown verb
 If `Reservation.book(...)` polls past `--poll-timeout` while the SLURM
 job is still PENDING, it **saves the lease and returns** with `node =
 None`; the SLURM job stays queued. Run `Reservation.get(name).refresh()`
-(or `scitex-hpc reservations refresh NAME`) later to pick up the node
+(or `scitex-hpc lease refresh NAME`) later to pick up the node
 once SLURM schedules it. Tear down only via `cancel()` /
-`reservations cancel`.
+`lease cancel`.
 
 This is intentional — reservations are long-lived blockers, and an
 auto-cancel on poll timeout would silently undo the operator's queue

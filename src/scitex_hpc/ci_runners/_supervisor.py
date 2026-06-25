@@ -76,6 +76,10 @@ def runner_keepalive_fragment(
         f'  while [ -f "{_sentinel()}" ]; do\n'
         f'    rm -f "$d/.needs-restart"\n'
         f'    echo "[$(date -u +%FT%TZ)] starting {tag}" >> "{runner.log}"\n'
+        # Clear a stale _work/_temp left by a prior session: the GitHub
+        # runner's TempDirectoryManager.InitializeTempDirectory fails at
+        # startup ("_temp already exists") if it survives a restart.
+        f'    rm -rf "$wd/_temp"\n'
         f'    ( cd "$d" \\\n'
         f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
         f'           PATH="$d/shims:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'

@@ -28,6 +28,15 @@ def test_fragment_runs_run_sh():
     assert "./run.sh" in frag
 
 
+def test_fragment_clears_stale_temp_before_restart():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — a stale _work/_temp would crash the runner at startup
+    assert 'rm -rf "$wd/_temp"' in frag
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")

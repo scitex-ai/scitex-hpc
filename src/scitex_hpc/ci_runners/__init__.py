@@ -48,6 +48,11 @@ from ._fleet import (
     parse_runner_dirs,
 )
 from ._monitor import build_monitor_script
+from ._overlap import (
+    build_exec_supervisor_script,
+    build_overlap_srun_command,
+    build_write_body_command,
+)
 from ._supervisor import build_supervisor_hold_body, runner_keepalive_fragment
 
 __all__ = [
@@ -55,8 +60,11 @@ __all__ = [
     "RUNNER_DIR_PREFIX",
     "FleetSpec",
     "RunnerSpec",
+    "build_exec_supervisor_script",
     "build_monitor_script",
+    "build_overlap_srun_command",
     "build_supervisor_hold_body",
+    "build_write_body_command",
     "parse_runner_dirs",
     "runner_keepalive_fragment",
 ]

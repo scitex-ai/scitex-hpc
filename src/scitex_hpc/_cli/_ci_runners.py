@@ -6,6 +6,9 @@ Subcommands:
     and host the whole runner fleet on it under auto-restart keep-alive
     loops. Default ``--dry-run`` prints the plan; pass ``--confirm`` to
     actually submit (never on import, never implicitly).
+  * ``exec-supervisor`` — run the SAME supervisor body inside an
+    ALREADY-RUNNING allocation via ``srun --jobid=<holder> --overlap``,
+    for when a dedicated node won't schedule. Same ``--confirm`` gate.
   * ``show-monitor`` — emit the cron-driven health-monitor script.
   * ``show-archive`` — emit a script that archives the old ``~`` band-aid
     scripts to ``.old/<timestamp>/`` on the cluster (the operator runs it
@@ -28,11 +31,14 @@ from .._config import JobConfig
 from .._reservation import Reservation
 from ..ci_runners import (
     FleetSpec,
+    build_exec_supervisor_script,
     build_monitor_script,
+    build_overlap_srun_command,
     build_supervisor_hold_body,
     parse_runner_dirs,
 )
 from ..ci_runners._archive import build_archive_script
+from ..ci_runners._overlap import DEFAULT_BODY_PATH, DEFAULT_LOG_PATH
 
 # Spartan default CI base (overridable). Documented, not magic: this is
 # where the 72 install dirs live today.
@@ -174,6 +180,130 @@ def book_supervisor_cmd(
         return
     res = Reservation.book(cfg, persistent=True, hold_body=hold_body)
     click.echo(f"booked: id={res.id} job={res.job_id} node={res.node}")
+    click.echo(
+        "Wire the health monitor next:\n"
+        "  scitex-hpc ci-runners show-monitor "
+        f"--host {host} --name {lease_name} > ~/.scitex/ci/monitor.sh"
+    )
+
+
+@ci_runners.command("exec-supervisor")
+@click.option("--host", default="spartan", help="SSH host (default: spartan).")
+@click.option(
+    "--overlap-jobid",
+    "overlap_jobid",
+    required=True,
+    help="SLURM jobid of an ALREADY-RUNNING holder allocation to overlap onto.",
+)
+@click.option("--ci-base", default=_DEFAULT_CI_BASE, help="CI base dir.")
+@click.option("--exclude", multiple=True, help="Runner name(s) to exclude.")
+@click.option(
+    "--name", "lease_name", default=_DEFAULT_LEASE_NAME, help="Lease/job name."
+)
+@click.option(
+    "--backoff",
+    type=int,
+    default=None,
+    help="Seconds a keep-alive loop waits before relaunching a dead runner.",
+)
+@click.option(
+    "--toolcache",
+    default=None,
+    help="Runner tool cache dir (AGENT_TOOLSDIRECTORY / RUNNER_TOOL_CACHE).",
+)
+@click.option(
+    "--work-root",
+    "work_root",
+    default=None,
+    help="Root for per-runner _work dirs (kept off the home quota).",
+)
+@click.option(
+    "--confirm",
+    is_flag=True,
+    help="Actually launch the overlap step (default is dry-run).",
+)
+def exec_supervisor_cmd(
+    host,
+    overlap_jobid,
+    ci_base,
+    exclude,
+    lease_name,
+    backoff,
+    toolcache,
+    work_root,
+    confirm,
+):
+    """Run the supervisor on an ALREADY-RUNNING allocation (no new node).
+
+    \b
+    Same fleet, same keep-alive body as ``book-supervisor`` — but instead
+    of booking a fresh dedicated node (which won't schedule on a full
+    partition), it launches the supervisor as a STEP inside an existing
+    holder allocation via ``srun --jobid=<holder> --overlap``. The step
+    is detached with ``setsid nohup`` and stays alive because the body's
+    ``wait`` blocks in the step's foreground.
+
+    \b
+    Default is DRY-RUN: prints the supervisor body + the exact srun
+    command. Add --confirm to actually launch over SSH.
+
+    \b
+    Example (overlay the fleet onto running holder job 26437532):
+      $ scitex-hpc ci-runners exec-supervisor --overlap-jobid 26437532 --confirm
+    """
+    fleet = _discover(host, ci_base, tuple(exclude))
+    # Apply the optional supervisor knobs onto the shared FleetSpec so the
+    # SAME body generator (build_supervisor_hold_body) honours them.
+    if backoff is not None:
+        fleet.restart_backoff = backoff
+    if toolcache is not None:
+        fleet.toolcache = toolcache
+    if work_root is not None:
+        fleet.work_root = work_root
+    active = fleet.active()
+    if not active:
+        click.echo(f"no runners found under {ci_base}", err=True)
+        sys.exit(2)
+    hold_body = build_supervisor_hold_body(fleet)
+    srun_cmd = build_overlap_srun_command(overlap_jobid)
+    if not confirm:
+        click.echo("DRY RUN — would exec supervisor on existing allocation:")
+        click.echo(
+            _json.dumps(
+                {
+                    "lease_name": lease_name,
+                    "host": host,
+                    "overlap_jobid": overlap_jobid,
+                    "body_path": DEFAULT_BODY_PATH,
+                    "log_path": DEFAULT_LOG_PATH,
+                    "runners": [r.name for r in active],
+                },
+                indent=2,
+            )
+        )
+        click.echo("\n--- supervisor hold body ---")
+        click.echo(hold_body)
+        click.echo("\n--- srun launch command ---")
+        click.echo(srun_cmd)
+        click.echo("\nRe-run with --confirm to launch over SSH.")
+        return
+    from scitex_ssh import exec_remote
+
+    script = build_exec_supervisor_script(hold_body, overlap_jobid)
+    res = exec_remote(host, f"bash -lc {_json.dumps(script)}")
+    if res.stdout:
+        click.echo(res.stdout)
+    if res.stderr:
+        click.echo(res.stderr, err=True)
+    if res.returncode != 0:
+        click.echo(
+            f"exec-supervisor failed (rc={res.returncode})", err=True
+        )
+        sys.exit(res.returncode)
+    click.echo(
+        f"launched: overlap step on jobid {overlap_jobid} ({host}); "
+        f"log: {DEFAULT_LOG_PATH}"
+    )
     click.echo(
         "Wire the health monitor next:\n"
         "  scitex-hpc ci-runners show-monitor "

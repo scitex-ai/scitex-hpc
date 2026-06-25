@@ -181,6 +181,20 @@ def book_supervisor_cmd(
     )
 
 
+def _emit_script(script: str, out_path: str | None, as_json: bool) -> None:
+    """Write ``script`` to ``out_path`` (chmod +x) or echo it; JSON-wrap if asked."""
+    if out_path:
+        from pathlib import Path
+
+        p = Path(out_path).expanduser()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(script)
+        p.chmod(0o755)
+        click.echo(_json.dumps({"wrote": str(p)}) if as_json else f"wrote {p}")
+    else:
+        click.echo(_json.dumps({"script": script}) if as_json else script)
+
+
 @ci_runners.command("show-monitor")
 @click.option("--host", default="spartan", help="SSH host (default: spartan).")
 @click.option("--ci-base", default=_DEFAULT_CI_BASE, help="CI base dir.")
@@ -189,8 +203,9 @@ def book_supervisor_cmd(
     "--name", "lease_name", default=_DEFAULT_LEASE_NAME, help="Supervisor job name."
 )
 @click.option("--out", "out_path", default=None, help="Write to file (default stdout).")
-def show_monitor_cmd(host, ci_base, exclude, lease_name, out_path):
-    """Emit the cron-driven health-monitor script.
+@click.option("--json", "as_json", is_flag=True, help='Emit JSON ({"script": ...}).')
+def show_monitor_cmd(host, ci_base, exclude, lease_name, out_path, as_json):
+    """Show the cron-driven health-monitor script.
 
     \b
     Example:
@@ -200,16 +215,7 @@ def show_monitor_cmd(host, ci_base, exclude, lease_name, out_path):
     """
     fleet = _discover(host, ci_base, tuple(exclude))
     script = build_monitor_script(fleet, host=host, lease_name=lease_name)
-    if out_path:
-        from pathlib import Path
-
-        p = Path(out_path).expanduser()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(script)
-        p.chmod(0o755)
-        click.echo(f"wrote {p}")
-    else:
-        click.echo(script)
+    _emit_script(script, out_path, as_json)
 
 
 @ci_runners.command("show-archive")
@@ -217,8 +223,9 @@ def show_monitor_cmd(host, ci_base, exclude, lease_name, out_path):
     "--home", default="~", help="Remote home dir holding the band-aid scripts."
 )
 @click.option("--out", "out_path", default=None, help="Write to file (default stdout).")
-def show_archive_cmd(home, out_path):
-    """Emit a script that archives the old ``~`` band-aid scripts.
+@click.option("--json", "as_json", is_flag=True, help='Emit JSON ({"script": ...}).')
+def show_archive_cmd(home, out_path, as_json):
+    """Show a script that archives the old ``~`` band-aid scripts.
 
     Run this on the cluster AFTER the new supervisor is live — the live
     runners still depend on the band-aids until cutover.
@@ -229,13 +236,4 @@ def show_archive_cmd(home, out_path):
       $ bash ~/.scitex/ci/archive.sh   # run on the cluster after cutover
     """
     script = build_archive_script(home=home)
-    if out_path:
-        from pathlib import Path
-
-        p = Path(out_path).expanduser()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(script)
-        p.chmod(0o755)
-        click.echo(f"wrote {p}")
-    else:
-        click.echo(script)
+    _emit_script(script, out_path, as_json)

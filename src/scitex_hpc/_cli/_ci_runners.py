@@ -23,6 +23,7 @@ behind ``--confirm`` / hand-running the generated scripts.
 from __future__ import annotations
 
 import json as _json
+import shlex
 import sys
 
 import click
@@ -290,7 +291,11 @@ def exec_supervisor_cmd(
     from scitex_ssh import exec_remote
 
     script = build_exec_supervisor_script(hold_body, overlap_jobid)
-    res = exec_remote(host, f"bash -lc {_json.dumps(script)}")
+    # shlex.quote (NOT json.dumps): the script is a multi-line body with a
+    # heredoc; json.dumps escapes newlines to literal \n, which collapses the
+    # heredoc onto one line and breaks the env-hardening function. Single-quote
+    # quoting preserves real newlines and the body's embedded single quotes.
+    res = exec_remote(host, f"bash -lc {shlex.quote(script)}")
     if res.stdout:
         click.echo(res.stdout)
     if res.stderr:

@@ -91,6 +91,24 @@ def test_body_scrubs_easybuild_env():
     assert "grep -v easybuild" in body
 
 
+def test_body_sets_job_completed_hook():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — per-job hook so back-to-back jobs don't collide on stale _temp
+    assert "ACTIONS_RUNNER_HOOK_JOB_COMPLETED" in body
+
+
+def test_body_hook_clears_runner_temp():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — the hook rm -rf's the finished job's temp
+    assert 'rm -rf "$RUNNER_TEMP"' in body
+
+
 def test_body_respects_exclude():
     # Arrange
     fleet = _fleet("a", "b")

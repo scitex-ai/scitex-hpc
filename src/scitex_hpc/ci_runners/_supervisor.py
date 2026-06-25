@@ -40,6 +40,16 @@ export PATH="$(_scrub "${PATH:-}")"
 export AGENT_TOOLSDIRECTORY="__TOOLCACHE__"
 export RUNNER_TOOL_CACHE="__TOOLCACHE__"
 mkdir -p "__WORK_ROOT__"
+# Per-job _temp clear. A long-lived runner runs matrix jobs back-to-back
+# without restarting; the runner's own .NET cleanup intermittently fails
+# in this env, leaving _work/_temp so the next job crashes at startup
+# (IOException: _temp already exists). This JOB_COMPLETED hook rm -rf's
+# the temp AFTER each job (safe — the finished job's temp is gone), so
+# the next job inits clean. printf (not a heredoc) to avoid nesting
+# inside the body's own heredoc.
+printf '%s\n' '#!/usr/bin/env bash' '[ -n "${RUNNER_TEMP:-}" ] && rm -rf "$RUNNER_TEMP" 2>/dev/null' '[ -n "${RUNNER_WORK_DIRECTORY:-}" ] && rm -rf "$RUNNER_WORK_DIRECTORY/_temp" 2>/dev/null' 'exit 0' > "__HOOK_PATH__"
+chmod +x "__HOOK_PATH__"
+export ACTIONS_RUNNER_HOOK_JOB_COMPLETED="__HOOK_PATH__"
 """
 
 
@@ -115,9 +125,9 @@ def build_supervisor_hold_body(fleet: FleetSpec) -> str:
     """
     active = fleet.active()
     env = (
-        _ENV_HARDENING.replace("__TOOLCACHE__", fleet.toolcache).replace(
-            "__WORK_ROOT__", fleet.work_root
-        )
+        _ENV_HARDENING.replace("__TOOLCACHE__", fleet.toolcache)
+        .replace("__WORK_ROOT__", fleet.work_root)
+        .replace("__HOOK_PATH__", f"{fleet.work_root}/clear_temp_hook.sh")
     )
     head = (
         f"# === scitex-ci supervisor: {len(active)} runners ===\n"

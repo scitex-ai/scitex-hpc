@@ -65,11 +65,11 @@ scitex-hpc ci-runners book-supervisor
 scitex-hpc ci-runners book-supervisor --confirm
 
 # 4. Generate the cron monitor
-scitex-hpc ci-runners generate-monitor --out ~/.scitex/ci/monitor.sh
+scitex-hpc ci-runners show-monitor --out ~/.scitex/ci/monitor.sh
 chmod +x ~/.scitex/ci/monitor.sh
 
 # 5. (post-cutover) generate the band-aid archival script
-scitex-hpc ci-runners generate-archive --out /tmp/archive-bandaids.sh
+scitex-hpc ci-runners show-archive --out /tmp/archive-bandaids.sh
 ```
 
 Defaults target Spartan's `cascade` partition (32 cores / 128 GB / 7-day
@@ -92,7 +92,7 @@ auto-resubmits before it expires.
    node simply takes over.
 5. Drain / cancel the old borrowed-holder runners **only after** the new
    node shows all runners `Connected to GitHub` in their `keepalive.log`.
-6. `scitex-hpc ci-runners generate-monitor --out ~/.scitex/ci/monitor.sh`,
+6. `scitex-hpc ci-runners show-monitor --out ~/.scitex/ci/monitor.sh`,
    then add to crontab:
    ```
    */5 * * * * ~/.scitex/ci/monitor.sh >> ~/.scitex/ci/monitor.log 2>&1
@@ -102,7 +102,7 @@ auto-resubmits before it expires.
    one-liner), or rely on the default fleet
    `~/.dotfiles/src/.bin/utils/notify.sh` fallback, or let `cron` mail
    the stderr.
-8. `scitex-hpc ci-runners generate-archive` and **hand-run** the result on
+8. `scitex-hpc ci-runners show-archive` and **hand-run** the result on
    Spartan to move the `~` band-aids to `~/.old/<timestamp>/` — only
    after cutover, since the live runners depend on them until then.
 

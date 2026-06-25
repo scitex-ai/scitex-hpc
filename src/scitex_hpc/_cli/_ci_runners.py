@@ -6,8 +6,8 @@ Subcommands:
     and host the whole runner fleet on it under auto-restart keep-alive
     loops. Default ``--dry-run`` prints the plan; pass ``--confirm`` to
     actually submit (never on import, never implicitly).
-  * ``generate-monitor`` — emit the cron-driven health-monitor script.
-  * ``generate-archive`` — emit a script that archives the old ``~`` band-aid
+  * ``show-monitor`` — emit the cron-driven health-monitor script.
+  * ``show-archive`` — emit a script that archives the old ``~`` band-aid
     scripts to ``.old/<timestamp>/`` on the cluster (the operator runs it
     AFTER cutover; live runners still depend on the band-aids until then).
   * ``discover`` — list the runner install dirs found under the CI base.
@@ -176,12 +176,12 @@ def book_supervisor_cmd(
     click.echo(f"booked: id={res.id} job={res.job_id} node={res.node}")
     click.echo(
         "Wire the health monitor next:\n"
-        "  scitex-hpc ci-runners generate-monitor "
+        "  scitex-hpc ci-runners show-monitor "
         f"--host {host} --name {lease_name} > ~/.scitex/ci/monitor.sh"
     )
 
 
-@ci_runners.command("generate-monitor")
+@ci_runners.command("show-monitor")
 @click.option("--host", default="spartan", help="SSH host (default: spartan).")
 @click.option("--ci-base", default=_DEFAULT_CI_BASE, help="CI base dir.")
 @click.option("--exclude", multiple=True, help="Runner name(s) to exclude.")
@@ -189,12 +189,12 @@ def book_supervisor_cmd(
     "--name", "lease_name", default=_DEFAULT_LEASE_NAME, help="Supervisor job name."
 )
 @click.option("--out", "out_path", default=None, help="Write to file (default stdout).")
-def generate_monitor_cmd(host, ci_base, exclude, lease_name, out_path):
+def show_monitor_cmd(host, ci_base, exclude, lease_name, out_path):
     """Emit the cron-driven health-monitor script.
 
     \b
     Example:
-      $ scitex-hpc ci-runners generate-monitor --out ~/.scitex/ci/monitor.sh
+      $ scitex-hpc ci-runners show-monitor --out ~/.scitex/ci/monitor.sh
       $ chmod +x ~/.scitex/ci/monitor.sh
       # crontab: */5 * * * * ~/.scitex/ci/monitor.sh >> ~/.scitex/ci/monitor.log 2>&1
     """
@@ -212,12 +212,12 @@ def generate_monitor_cmd(host, ci_base, exclude, lease_name, out_path):
         click.echo(script)
 
 
-@ci_runners.command("generate-archive")
+@ci_runners.command("show-archive")
 @click.option(
     "--home", default="~", help="Remote home dir holding the band-aid scripts."
 )
 @click.option("--out", "out_path", default=None, help="Write to file (default stdout).")
-def generate_archive_cmd(home, out_path):
+def show_archive_cmd(home, out_path):
     """Emit a script that archives the old ``~`` band-aid scripts.
 
     Run this on the cluster AFTER the new supervisor is live — the live
@@ -225,7 +225,7 @@ def generate_archive_cmd(home, out_path):
 
     \b
     Example:
-      $ scitex-hpc ci-runners generate-archive --out ~/.scitex/ci/archive.sh
+      $ scitex-hpc ci-runners show-archive --out ~/.scitex/ci/archive.sh
       $ bash ~/.scitex/ci/archive.sh   # run on the cluster after cutover
     """
     script = build_archive_script(home=home)

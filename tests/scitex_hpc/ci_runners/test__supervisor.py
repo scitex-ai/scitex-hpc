@@ -46,6 +46,15 @@ def test_fragment_symlinks_work_to_local_disk():
     assert 'ln -sfn "$wd" "$d/_work"' in frag
 
 
+def test_fragment_moves_real_work_aside_before_symlink():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — mv (atomic, busy-safe) so ln -sfn replaces a real _work dir
+    assert 'mv "$d/_work"' in frag
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")

@@ -87,7 +87,14 @@ def runner_keepalive_fragment(
         # exists". Symlink _work to local xfs so the runner-side per-job
         # temp-init is atomic, eliminating the GPFS race (also fixes the
         # cancelled-job leftover case, independent of hook timing).
-        f'  [ -L "$d/_work" ] || rm -rf "$d/_work"\n'
+        # ln -sfn will NOT replace a real directory (it nests inside it),
+        # and rm -rf races with a dying old runner still holding _work. mv
+        # (atomic rename on the same FS) always succeeds even on a busy dir,
+        # so move the real _work aside, then symlink; background-clean the
+        # moved copy.
+        f'  if [ ! -L "$d/_work" ]; then '
+        f'mv "$d/_work" "$d/_work.gpfs-stale-$$" 2>/dev/null; '
+        f'rm -rf "$d/_work.gpfs-stale-$$" 2>/dev/null & fi\n'
         f'  ln -sfn "$wd" "$d/_work"\n'
         f'  echo "PID $$ supervising {tag} on $(hostname) at $(date -u +%FT%TZ)" '
         f'> "{runner.pidfile}"\n'

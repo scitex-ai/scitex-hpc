@@ -81,6 +81,14 @@ def runner_keepalive_fragment(
         f'  local d="{runner.dir}"\n'
         f'  local wd="{work}"\n'
         f'  mkdir -p "$wd"\n'
+        # The runner IGNORES RUNNER_WORK_DIRECTORY and uses
+        # <install-dir>/_work, which is on GPFS (a network FS) where the
+        # _temp delete/recreate races -> startup IOException "_temp already
+        # exists". Symlink _work to local xfs so the runner-side per-job
+        # temp-init is atomic, eliminating the GPFS race (also fixes the
+        # cancelled-job leftover case, independent of hook timing).
+        f'  [ -L "$d/_work" ] || rm -rf "$d/_work"\n'
+        f'  ln -sfn "$wd" "$d/_work"\n'
         f'  echo "PID $$ supervising {tag} on $(hostname) at $(date -u +%FT%TZ)" '
         f'> "{runner.pidfile}"\n'
         f'  while [ -f "{_sentinel()}" ]; do\n'

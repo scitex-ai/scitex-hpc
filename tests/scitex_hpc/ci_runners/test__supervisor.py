@@ -37,6 +37,15 @@ def test_fragment_clears_stale_temp_before_restart():
     assert 'rm -rf "$wd/_temp"' in frag
 
 
+def test_fragment_symlinks_work_to_local_disk():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — _work must point at local xfs (GPFS races break temp-init)
+    assert 'ln -sfn "$wd" "$d/_work"' in frag
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")

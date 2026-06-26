@@ -135,3 +135,21 @@ def test_body_respects_exclude():
     body = build_supervisor_hold_body(fleet)
     # Assert
     assert "actions-runner-b" not in body
+
+
+def test_body_overrides_tmpdir_to_local_disk():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — CI tmp on node-local disk under work_root, not under $HOME
+    assert f'export TMPDIR="{fleet.work_root}/tmp"' in body
+
+
+def test_body_tmpdir_override_comes_after_bashrc_source():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — the override must win over the profile's TMPDIR=$HOME/.cache/tmp
+    assert body.index('source "$HOME/.bashrc"') < body.index("export TMPDIR=")

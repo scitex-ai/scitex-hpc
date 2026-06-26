@@ -40,6 +40,16 @@ export PATH="$(_scrub "${PATH:-}")"
 export AGENT_TOOLSDIRECTORY="__TOOLCACHE__"
 export RUNNER_TOOL_CACHE="__TOOLCACHE__"
 mkdir -p "__WORK_ROOT__"
+# CI tmp on node-local disk, NOT $HOME. The sourced login profile sets
+# TMPDIR=$HOME/.cache/tmp; under $HOME a pytest tmp_path lets scitex's
+# project-type classifier walk up into the home ``.scitex`` tree and
+# mis-classify a pip project as ``research`` (self-hosted-only test
+# failures). A node-local TMPDIR also keeps tmp off the home quota and
+# the network FS. Must come AFTER the .bashrc source above to win.
+export TMPDIR="__WORK_ROOT__/tmp"
+export TMP="$TMPDIR"
+export TEMP="$TMPDIR"
+mkdir -p "$TMPDIR"
 # Per-job _temp clear. A long-lived runner runs matrix jobs back-to-back
 # without restarting; the runner's own .NET cleanup intermittently fails
 # in this env, leaving _work/_temp so the next job crashes at startup

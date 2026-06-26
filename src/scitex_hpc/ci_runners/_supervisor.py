@@ -53,6 +53,52 @@ export ACTIONS_RUNNER_HOOK_JOB_COMPLETED="__HOOK_PATH__"
 """
 
 
+# Idempotent, non-fatal Python tool-cache provisioning. ``setup-python@v5``
+# resolves interpreters from ``RUNNER_TOOL_CACHE``; a fresh or reinstalled
+# node starts EMPTY, so a job that ``setup-python``s 3.x would fail. We lay
+# down portable CPython (python-build-standalone via ``uv``) in the exact
+# layout setup-python expects ($CACHE/Python/<ver>/x64 + ``x64.complete``),
+# so the node SELF-HEALS instead of needing a manual cache build. Spartan is
+# RHEL, which actions/python-versions has no build for (hence pbs, which is
+# distro-portable). The interpreters' ``EXTERNALLY-MANAGED`` marker is KEPT:
+# the cache is shared + read-only across all runners, so per-job ``venv``s do
+# the installing (a stray base ``pip install`` would race the shared cache).
+# Every step is guarded — a provisioning hiccup must never block runner
+# launch. Runs ONCE at supervisor start, before any runner is spawned, so no
+# job can be reading an interpreter while it is laid down.
+_TOOLCACHE_PROVISION = r"""# --- scitex-ci Python tool-cache provisioning (idempotent) ---
+_provision_toolcache() {
+  local cache="__TOOLCACHE__" uvdir="__WORK_ROOT__/tooling" src="__WORK_ROOT__/hostedtoolcache-src"
+  local uv="$uvdir/uv" need="" v
+  for v in 3.11 3.12 3.13; do
+    ls "$cache"/Python/"$v".*/x64.complete >/dev/null 2>&1 || need="$need $v"
+  done
+  [ -z "$need" ] && return 0
+  echo "[scitex-ci] provisioning Python tool-cache:$need" >&2
+  mkdir -p "$uvdir" "$src" "$cache/Python" 2>/dev/null || true
+  if [ ! -x "$uv" ]; then
+    curl -LsSf -m 120 https://astral.sh/uv/install.sh \
+      | env UV_INSTALL_DIR="$uvdir" INSTALLER_NO_MODIFY_PATH=1 sh >/dev/null 2>&1 || return 0
+  fi
+  [ -x "$uv" ] || return 0
+  UV_PYTHON_INSTALL_DIR="$src" "$uv" python install $need >/dev/null 2>&1 || return 0
+  local d full dst
+  for d in "$src"/cpython-3.*-linux-*-gnu; do
+    [ -x "$d/bin/python3" ] || continue
+    full="$("$d/bin/python3" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])' 2>/dev/null)" || continue
+    [ -n "$full" ] || continue
+    dst="$cache/Python/$full/x64"
+    mkdir -p "$cache/Python/$full" 2>/dev/null || true
+    rm -rf "$dst" 2>/dev/null || true
+    ln -sfn "$d" "$dst"
+    [ -e "$dst/bin/python" ] || ln -sfn python3 "$dst/bin/python" 2>/dev/null || true
+    : > "$cache/Python/$full/x64.complete" 2>/dev/null || true
+  done
+}
+_provision_toolcache || true
+"""
+
+
 def runner_keepalive_fragment(
     runner: RunnerSpec,
     *,
@@ -144,9 +190,13 @@ def build_supervisor_hold_body(fleet: FleetSpec) -> str:
         .replace("__WORK_ROOT__", fleet.work_root)
         .replace("__HOOK_PATH__", f"{fleet.work_root}/clear_temp_hook.sh")
     )
+    provision = _TOOLCACHE_PROVISION.replace(
+        "__TOOLCACHE__", fleet.toolcache
+    ).replace("__WORK_ROOT__", fleet.work_root)
     head = (
         f"# === scitex-ci supervisor: {len(active)} runners ===\n"
         f"{env}\n"
+        f"{provision}\n"
         f'mkdir -p "$(dirname {_sentinel()})"\n'
         f'echo "$(date -u +%FT%TZ) $(hostname)" > {_sentinel()}\n'
         f"_scitex_ci_shutdown() {{ rm -f {_sentinel()}; }}\n"

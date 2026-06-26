@@ -135,3 +135,39 @@ def test_body_respects_exclude():
     body = build_supervisor_hold_body(fleet)
     # Assert
     assert "actions-runner-b" not in body
+
+
+def test_body_provisions_toolcache():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — a fresh node self-heals the setup-python interpreter cache
+    assert "_provision_toolcache" in body
+
+
+def test_body_provision_writes_complete_marker():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — interpreters laid out in setup-python's $CACHE/<ver>/x64 layout
+    assert "x64.complete" in body
+
+
+def test_body_provision_is_non_fatal():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — a provisioning hiccup must never block runner launch
+    assert "_provision_toolcache || true" in body
+
+
+def test_body_provision_substitutes_toolcache_placeholder():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — no unsubstituted template tokens leak into the shell body
+    assert "__TOOLCACHE__" not in body

@@ -32,6 +32,20 @@ from ._fleet import FleetSpec, RunnerSpec
 _ENV_HARDENING = r"""# --- scitex-ci shared runner env hardening ---
 source "$HOME/.bashrc" 2>/dev/null || true
 module purge 2>/dev/null || true
+# Strip inherited personal secrets. Sourcing the interactive profile above
+# pulls the operator's credentials (API keys, OAuth tokens, email/SSO/Visa
+# passwords) into the runner env, where EVERY CI job -- including any PR
+# workflow -- could read and exfiltrate them off these shared runners. CI
+# jobs get tools + PATH only; real per-job secrets must come from GitHub
+# Actions secrets, never the runner profile. compgen -v is expanded once,
+# so unsetting during the loop is safe.
+for _name in $(compgen -v 2>/dev/null); do
+  case "$_name" in
+    *PASSWORD*|*PASSWD*|*TOKEN*|*SECRET*|*API_KEY*|*APIKEY*|*_KEY|*_KEYS|*BEARER*|*CREDENTIAL*|*CONSUMER_KEY*|*ACCESS_KEY*|*PRIVATE_KEY*)
+      unset "$_name" 2>/dev/null || true ;;
+  esac
+done
+unset _name
 unset PYTHONHOME PYTHONPATH
 export PYTHONNOUSERSITE=1
 _scrub() { echo "${1:-}" | tr ':' '\n' | grep -v easybuild | grep -v '^$' | tr '\n' ':' | sed 's/:$//'; }

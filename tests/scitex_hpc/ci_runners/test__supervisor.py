@@ -171,3 +171,30 @@ def test_body_provision_substitutes_toolcache_placeholder():
     body = build_supervisor_hold_body(fleet)
     # Assert — no unsubstituted template tokens leak into the shell body
     assert "__TOOLCACHE__" not in body
+
+
+def test_body_scrubs_inherited_secret_env_vars():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — a loop over the env unsets secret-pattern vars the profile leaked
+    assert "compgen -v" in body
+
+
+def test_body_scrub_covers_password_pattern():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — passwords (email/SSO/Visa) must be stripped from the job env
+    assert "*PASSWORD*" in body
+
+
+def test_body_scrub_covers_token_pattern():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — OAuth/bearer tokens must be stripped from the job env
+    assert "*TOKEN*" in body

@@ -50,7 +50,8 @@ unset PYTHONHOME PYTHONPATH
 export PYTHONNOUSERSITE=1
 _scrub() { echo "${1:-}" | tr ':' '\n' | grep -v easybuild | grep -v '^$' | tr '\n' ':' | sed 's/:$//'; }
 export LD_LIBRARY_PATH="$(_scrub "${LD_LIBRARY_PATH:-}")"
-export PATH="$(_scrub "${PATH:-}")"
+# ~/.bin holds gh; ~/.bashrc only adds it for interactive shells, so prepend explicitly here or release-tail gh 127-fails in this non-interactive supervisor.
+export PATH="$HOME/.bin:$HOME/.local/bin:$HOME/.cargo/bin:$(_scrub "${PATH:-}")"
 export AGENT_TOOLSDIRECTORY="__TOOLCACHE__"
 export RUNNER_TOOL_CACHE="__TOOLCACHE__"
 mkdir -p "__WORK_ROOT__"
@@ -177,7 +178,7 @@ def runner_keepalive_fragment(
         f'    rm -rf "$wd/_temp"\n'
         f'    ( cd "$d" \\\n'
         f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
-        f'           PATH="$d/shims:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
+        f'           PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
         f'           ./run.sh ) >> "{runner.log}" 2>&1\n'
         f'    rc=$?\n'
         f'    echo "[$(date -u +%FT%TZ)] {tag} run.sh exited rc=$rc; '

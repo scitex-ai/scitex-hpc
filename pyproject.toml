@@ -57,7 +57,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Ship the SKILL.md leaf so skill-discovery agents (scitex-dev, etc.)
 # can find it after `pip install scitex-hpc`.
-scitex_hpc = ["_skills/**/*.md"]
+scitex_hpc = ["_skills/**/*.md", "login_guard/*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

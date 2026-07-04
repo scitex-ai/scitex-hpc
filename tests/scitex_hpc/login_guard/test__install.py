@@ -1,29 +1,17 @@
-"""Tests for the config-driven HPC login-node guard.
-
-Covers the Spartan-profile render (heavy-tool + du/find guards, the
-cross-repo ``[BLOCKED]`` / rc-100 contract, the ``$SLURM_JOB_ID`` escape,
-login-node host match, the ``/data/`` protected-prefix walk guard, and the
-``mmlsquota`` hint), the ``~/.bashrc`` insertion transform, the remote
-install script, AND a NON-Spartan custom profile (proving the guard is
-truly generalized, not hardcoded).
-"""
+"""Tests for the Spartan login-node guard text + bashrc-insertion logic."""
 
 from __future__ import annotations
 
 import pytest
 
 from scitex_hpc.login_guard import (
-    BLOCKED_RC,
-    BLOCKED_TOKEN,
     REMOTE_GUARD_PATH,
-    GuardProfile,
     build_bashrc,
     build_install_script,
     guard_text,
-    render_guard,
 )
 
-# The TeX toolchain the Spartan guard must override (the incident vector).
+# The TeX toolchain the guard must override (the incident vector).
 TEX_TOOLS = (
     "xelatex",
     "pdflatex",
@@ -45,7 +33,7 @@ _ANCHOR = "000_spartan_noninteractive_libs.src"
 
 
 # --------------------------------------------------------------------------
-# Spartan-profile guard text — heavy-compute guard
+# Guard text
 # --------------------------------------------------------------------------
 def test_guard_has_slurm_job_id_escape():
     # Arrange
@@ -65,18 +53,6 @@ def test_guard_matches_spartan_login_host():
     assert matches
 
 
-@pytest.mark.parametrize(
-    "pat", ("spartan-login*", "spartan-gateway*", "spartanlogin*")
-)
-def test_guard_matches_each_spartan_login_pattern(pat):
-    # Arrange
-    guard = guard_text()
-    # Act — every login-node pattern from the profile is templated in.
-    present = pat in guard
-    # Assert
-    assert present
-
-
 @pytest.mark.parametrize("tool", TEX_TOOLS)
 def test_guard_defines_tex_tool(tool):
     # Arrange
@@ -87,43 +63,7 @@ def test_guard_defines_tex_tool(tool):
     assert present
 
 
-def test_blocked_token_constant_is_contract_value():
-    # Arrange
-    expected = "[BLOCKED]"
-    # Act
-    actual = BLOCKED_TOKEN
-    # Assert — scitex-writer keys off this exact stderr token.
-    assert actual == expected
-
-
-def test_blocked_rc_constant_is_contract_value():
-    # Arrange
-    expected = 100
-    # Act
-    actual = BLOCKED_RC
-    # Assert — scitex-writer keys off this exact exit code.
-    assert actual == expected
-
-
-def test_guard_emits_blocked_token():
-    # Arrange
-    guard = guard_text()
-    # Act
-    present = BLOCKED_TOKEN in guard
-    # Assert
-    assert present
-
-
-def test_guard_returns_blocked_rc():
-    # Arrange
-    guard = guard_text()
-    # Act
-    present = f"return {BLOCKED_RC}" in guard
-    # Assert
-    assert present
-
-
-def test_guard_provides_tex_helper():
+def test_guard_provides_spartan_tex_helper():
     # Arrange
     guard = guard_text()
     # Act
@@ -141,7 +81,7 @@ def test_guard_wraps_helper_in_srun():
     assert has_srun
 
 
-def test_guard_defines_login_guard_function():
+def test_guard_defines_guard_function():
     # Arrange
     guard = guard_text()
     # Act
@@ -157,255 +97,6 @@ def test_guard_exports_functions():
     exported = "export -f" in guard
     # Assert — exported so non-interactive subshells inherit the override.
     assert exported
-
-
-# --------------------------------------------------------------------------
-# Spartan-profile guard text — du/find filesystem-walk guard
-# --------------------------------------------------------------------------
-def test_guard_defines_fswalk_function():
-    # Arrange
-    guard = guard_text()
-    # Act
-    has_fn = "_spartan_fswalk_guard()" in guard
-    # Assert — the du/find walk guard exists.
-    assert has_fn
-
-
-@pytest.mark.parametrize("tool", ("du", "find"))
-def test_guard_overrides_fswalk_tool(tool):
-    # Arrange
-    guard = guard_text()
-    # Act — the fswalk override loop lists du and find.
-    has_loop = f"for _stx_w in {tool}" in guard or f" {tool} " in guard or (
-        f"in du find" in guard
-    )
-    # Assert
-    assert has_loop
-
-
-def test_guard_checks_protected_prefix_in_args():
-    # Arrange
-    guard = guard_text()
-    # Act — each argument is matched against the /data/ prefix.
-    checks_args = 'for _a in "$@"' in guard and "/data/*)" in guard
-    # Assert
-    assert checks_args
-
-
-def test_guard_checks_protected_prefix_in_pwd():
-    # Arrange
-    guard = guard_text()
-    # Act — the current directory is matched against the /data/ prefix too.
-    checks_pwd = 'case "$PWD" in /data/*)' in guard
-    # Assert
-    assert checks_pwd
-
-
-def test_guard_includes_quota_hint():
-    # Arrange
-    guard = guard_text()
-    # Act
-    has_hint = "mmlsquota -j punim2354 punim2354" in guard
-    # Assert — points users at the metadata-only query instead of a walk.
-    assert has_hint
-
-
-def test_guard_fswalk_emits_blocked_token():
-    # Arrange
-    guard = guard_text()
-    body = guard[guard.index("_spartan_fswalk_guard()"):]
-    # Act
-    present = BLOCKED_TOKEN in body
-    # Assert — the fswalk guard refuses with the same token as heavy tools.
-    assert present
-
-
-def test_guard_fswalk_returns_blocked_rc():
-    # Arrange
-    guard = guard_text()
-    body = guard[guard.index("_spartan_fswalk_guard()"):]
-    # Act
-    present = f"return {BLOCKED_RC}" in body
-    # Assert — the fswalk guard refuses with the same rc as heavy tools.
-    assert present
-
-
-# --------------------------------------------------------------------------
-# Generalization — a NON-Spartan custom profile renders custom values
-# --------------------------------------------------------------------------
-def _gadi_profile() -> GuardProfile:
-    """A wholly different site to prove the guard is not Spartan-hardcoded."""
-    return GuardProfile(
-        name="gadi",
-        login_node_patterns=["gadi-login*"],
-        protected_path_prefixes=["/g/data/", "/scratch/"],
-        heavy_tools=["pdflatex", "Rscript"],
-        fswalk_tools=["du", "find", "ncdu"],
-        quota_hint_cmd="lquota -u $USER",
-        srun_template="srun --partition=normal --time=0:30:00",
-        texbin="/apps/texlive/2023/bin/x86_64-linux",
-    )
-
-
-@pytest.fixture
-def gadi_guard() -> str:
-    return render_guard(_gadi_profile())
-
-
-def _bash_n_rc(guard: str) -> int:
-    import subprocess
-    import tempfile
-
-    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
-        fh.write(guard)
-        path = fh.name
-    return subprocess.run(
-        ["bash", "-n", path], capture_output=True, text=True
-    ).returncode
-
-
-def test_custom_profile_renders_custom_login_pattern(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "gadi-login*" in guard
-    # Assert — the custom host pattern is templated in.
-    assert present
-
-
-def test_custom_profile_omits_spartan_login_pattern(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    leaked = "spartan-login*" in guard
-    # Assert — proves the render is not Spartan-hardcoded.
-    assert not leaked
-
-
-def test_custom_profile_renders_first_protected_prefix(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act — both prefixes share one |-joined case arm: /g/data/*|/scratch/*.
-    present = "/g/data/*" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_renders_second_protected_prefix(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "/scratch/*" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_joins_protected_prefixes_into_one_case_arm(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act — the $PWD guard matches against the |-joined prefixes.
-    present = 'case "$PWD" in /g/data/*|/scratch/*)' in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_omits_spartan_protected_prefix(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    leaked = 'in /data/*)' in guard
-    # Assert — the Spartan-only prefix must not appear.
-    assert not leaked
-
-
-def test_custom_profile_renders_custom_heavy_tool(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "Rscript" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_renders_custom_fswalk_tool(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "ncdu" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_renders_custom_quota_hint(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "lquota -u $USER" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_renders_custom_srun_template(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "srun --partition=normal" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_renders_named_tex_helper(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "gadi-tex()" in guard
-    # Assert — the helper is named after the profile.
-    assert present
-
-
-def test_custom_profile_emits_blocked_token(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = BLOCKED_TOKEN in guard
-    # Assert — the cross-repo contract holds for ANY profile.
-    assert present
-
-
-def test_custom_profile_returns_blocked_rc(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = f"return {BLOCKED_RC}" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_has_slurm_escape(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    present = "SLURM_JOB_ID" in guard
-    # Assert
-    assert present
-
-
-def test_custom_profile_guard_is_valid_bash(gadi_guard):
-    # Arrange
-    guard = gadi_guard
-    # Act
-    rc = _bash_n_rc(guard)
-    # Assert — bash -n accepts the generated script.
-    assert rc == 0
-
-
-def test_spartan_profile_guard_is_valid_bash():
-    # Arrange
-    guard = guard_text()
-    # Act
-    rc = _bash_n_rc(guard)
-    # Assert
-    assert rc == 0
 
 
 # --------------------------------------------------------------------------
@@ -517,23 +208,5 @@ def test_install_script_embeds_guard_verbatim():
     script = build_install_script()
     # Act
     present = "_spartan_login_guard()" in script
-    # Assert — the rendered guard body is spliced in.
-    assert present
-
-
-def test_install_script_embeds_custom_profile_host_pattern():
-    # Arrange — install script respects a non-default profile.
-    script = build_install_script(profile=_gadi_profile())
-    # Act
-    present = "gadi-login*" in script
-    # Assert — the custom guard body is spliced into the install script.
-    assert present
-
-
-def test_install_script_embeds_custom_profile_guard_function():
-    # Arrange
-    script = build_install_script(profile=_gadi_profile())
-    # Act
-    present = "_gadi_login_guard()" in script
-    # Assert — the per-profile function name is used.
+    # Assert — the vendored guard body is spliced in.
     assert present

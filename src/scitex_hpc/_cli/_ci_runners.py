@@ -39,7 +39,11 @@ from ..ci_runners import (
     parse_runner_dirs,
 )
 from ..ci_runners._archive import build_archive_script
-from ..ci_runners._overlap import DEFAULT_BODY_PATH, DEFAULT_LOG_PATH
+from ..ci_runners._overlap import (
+    DEFAULT_BODY_PATH,
+    DEFAULT_HOLDER_JOBID_PATH,
+    DEFAULT_LOG_PATH,
+)
 
 # Spartan default CI base (overridable). Documented, not magic: this is
 # where the 72 install dirs live today.
@@ -365,6 +369,47 @@ def show_monitor_cmd(host, ci_base, exclude, lease_name, overlap_jobid, out_path
         fleet, host=host, lease_name=lease_name, overlap_jobid=overlap_jobid
     )
     _emit_script(script, out_path, as_json)
+
+
+@ci_runners.command("watch")
+@click.option("--host", default="spartan", help="SSH host (default: spartan).")
+@click.option("--ci-base", default=_DEFAULT_CI_BASE, help="CI base dir.")
+@click.option("--exclude", multiple=True, help="Runner name(s) to exclude.")
+@click.option(
+    "--jobid-file",
+    default=DEFAULT_HOLDER_JOBID_PATH,
+    help="Runtime file the supervisor writes its holder job id to.",
+)
+def watch_cmd(host, ci_base, exclude, jobid_file):
+    """Run ONE supervisor health-check tick (the cron watchdog entrypoint).
+
+    This is the command the federated ``scitex_dev.jobs`` JobSpec runs every
+    few minutes. It discovers the fleet, resolves the live holder job id from
+    ``--jobid-file`` (written by exec-supervisor — no fragile squeue-by-name
+    lookup), runs the health monitor, pipes any alarm to ``$SCITEX_CI_ALARM_CMD``,
+    and exits with the monitor's code:
+
+    \b
+      0  fleet healthy
+      1  degraded (some runners down) — alarm fired
+      2  allocation gone / unreachable — alarm fired
+      3  supervisor UNREGISTERED (no holder jobid file) — alarm fired
+
+    \b
+    Example (federated cron installs this automatically):
+      $ scitex-hpc ci-runners watch
+    """
+    import subprocess
+
+    fleet = _discover(host, ci_base, tuple(exclude))
+    script = build_monitor_script(
+        fleet,
+        host=host,
+        lease_name=_DEFAULT_LEASE_NAME,
+        overlap_jobid_file=jobid_file,
+    )
+    proc = subprocess.run(["bash", "-c", script])
+    sys.exit(proc.returncode)
 
 
 @ci_runners.command("show-archive")

@@ -94,9 +94,18 @@ export ACTIONS_RUNNER_HOOK_JOB_COMPLETED="__HOOK_PATH__"
 _TOOLCACHE_PROVISION = r"""# --- scitex-ci Python tool-cache provisioning (idempotent) ---
 _provision_toolcache() {
   local cache="__TOOLCACHE__" uvdir="__WORK_ROOT__/tooling" src="__WORK_ROOT__/hostedtoolcache-src"
-  local uv="$uvdir/uv" need="" v
+  local uv="$uvdir/uv" need="" v p ok
+  # Verify the interpreter actually RESOLVES + runs, not just that the
+  # x64.complete marker exists. If hostedtoolcache-src is deleted, the marker
+  # and x64 symlink survive but DANGLE, so setup-python resolves a dead link
+  # ("version x64 not found") fleet-wide (2026-07-06 outage). A broken/missing
+  # interpreter re-provisions and relays the symlink onto node-local src.
   for v in 3.11 3.12 3.13; do
-    ls "$cache"/Python/"$v".*/x64.complete >/dev/null 2>&1 || need="$need $v"
+    ok=""
+    for p in "$cache"/Python/"$v".*/x64/bin/python3; do
+      [ -x "$p" ] && "$p" --version >/dev/null 2>&1 && { ok=1; break; }
+    done
+    [ -n "$ok" ] || need="$need $v"
   done
   [ -z "$need" ] && return 0
   echo "[scitex-ci] provisioning Python tool-cache:$need" >&2

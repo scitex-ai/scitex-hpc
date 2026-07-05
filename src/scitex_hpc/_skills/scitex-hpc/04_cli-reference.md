@@ -39,6 +39,7 @@ so the lease and queue position survive across operator workflows.
 | Verb | Purpose |
 |---|---|
 | `lease book NAME` | Submit a hold-job and (optionally) wait for RUNNING |
+| `lease adopt NAME --job-id <id> --host <host>` | Register an EXISTING running SLURM job as a lease (NO sbatch); writes the same lease state as `book`. `--persistent` only marks it (cannot retro-add the SIGUSR1 resubmit trap to a running job) |
 | `lease list` | List active leases (lease-file view) |
 | `lease get NAME` | One lease as JSON |
 | `lease exec NAME 'CMD'` | Run `CMD` inside the allocation (returns stdout/stderr/exit) |

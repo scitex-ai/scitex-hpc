@@ -337,19 +337,33 @@ def _emit_script(script: str, out_path: str | None, as_json: bool) -> None:
 @click.option(
     "--name", "lease_name", default=_DEFAULT_LEASE_NAME, help="Supervisor job name."
 )
+@click.option(
+    "--overlap-jobid",
+    "overlap_jobid",
+    default=None,
+    help="Resolve the supervisor via this holder JOB ID (squeue --job) "
+    "instead of --name. Use for the exec-supervisor deploy, where the "
+    "supervisor is an --overlap step on an existing holder job (no job "
+    "named --name exists, so the name lookup would false-alarm).",
+)
 @click.option("--out", "out_path", default=None, help="Write to file (default stdout).")
 @click.option("--json", "as_json", is_flag=True, help='Emit JSON ({"script": ...}).')
-def show_monitor_cmd(host, ci_base, exclude, lease_name, out_path, as_json):
+def show_monitor_cmd(host, ci_base, exclude, lease_name, overlap_jobid, out_path, as_json):
     """Show the cron-driven health-monitor script.
 
     \b
     Example:
+      # dedicated book-supervisor allocation (resolve by name):
       $ scitex-hpc ci-runners show-monitor --out ~/.scitex/ci/monitor.sh
+      # exec-supervisor on an existing holder (resolve by job id):
+      $ scitex-hpc ci-runners show-monitor --overlap-jobid 26437532 --out ~/.scitex/ci/monitor.sh
       $ chmod +x ~/.scitex/ci/monitor.sh
       # crontab: */5 * * * * ~/.scitex/ci/monitor.sh >> ~/.scitex/ci/monitor.log 2>&1
     """
     fleet = _discover(host, ci_base, tuple(exclude))
-    script = build_monitor_script(fleet, host=host, lease_name=lease_name)
+    script = build_monitor_script(
+        fleet, host=host, lease_name=lease_name, overlap_jobid=overlap_jobid
+    )
     _emit_script(script, out_path, as_json)
 
 

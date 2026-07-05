@@ -52,19 +52,48 @@ alarm() {
 """
 
 
-def build_monitor_script(fleet: FleetSpec, *, host: str, lease_name: str) -> str:
+def build_monitor_script(
+    fleet: FleetSpec,
+    *,
+    host: str,
+    lease_name: str,
+    overlap_jobid: str | None = None,
+) -> str:
     """Return a self-contained POSIX ``bash`` health-monitor script.
 
     ``host`` is the SSH alias for the cluster (e.g. ``spartan``);
     ``lease_name`` is the supervisor allocation's SLURM job name (matches
     the Reservation friendly name, e.g. ``spartan-ci-runner-fleet``).
 
+    ``overlap_jobid`` switches step 1 from a name lookup to a **job-id**
+    lookup (``squeue --job=<id>``). Use it when the supervisor runs as an
+    ``exec-supervisor`` step on an EXISTING holder allocation rather than a
+    dedicated named ``book-supervisor`` job — there is no job named
+    ``lease_name`` in that deploy, so the name lookup would find nothing and
+    false-alarm "allocation DOWN" every tick. Both paths key the per-runner
+    listener check off the resolved job id, so step 2 is identical.
+
     The generated script is idempotent and read-mostly: its only write to
     the cluster is, when a runner's listener is missing, to *touch* a
     per-runner ``.needs-restart`` marker the supervisor loop notices — it
-    never kills the supervisor or any live runner. Allocation rebooking
-    stays a deliberate operator action.
+    never kills the supervisor or any live runner. Allocation rebooking /
+    supervisor re-exec stays a deliberate operator action.
     """
+    if overlap_jobid:
+        squeue_selector = f"--job={overlap_jobid}"
+        target_ident = f"holder job {overlap_jobid}"
+        recover_hint = (
+            "the supervisor runs as an --overlap step on this holder; "
+            "re-exec with: scitex-hpc ci-runners exec-supervisor "
+            f"--overlap-jobid {overlap_jobid} ... (operator action)"
+        )
+    else:
+        squeue_selector = f"--name={lease_name}"
+        target_ident = f"lease '{lease_name}'"
+        recover_hint = (
+            "Rebook with: scitex-hpc ci-runners book-supervisor ... "
+            "(operator action)."
+        )
     names = " ".join(r.name for r in fleet.active())
     dirs = "\n".join(
         f'  ["{r.name}"]="{r.dir}"' for r in fleet.active()
@@ -92,12 +121,12 @@ TS="$(date -u +%FT%TZ)"
 # off the resolved JOBID so we never re-query the scheduler per runner.
 read -r JOBID STATE NODE < <(
   ssh "$HOST" bash -lc \\
-    "squeue --user=\\$USER --name={lease_name} --noheader --format='%i %T %N' 2>/dev/null" \\
+    "squeue --user=\\$USER {squeue_selector} --noheader --format='%i %T %N' 2>/dev/null" \\
     2>/dev/null | awk 'NR==1{{print $1, $2, $3}}'
 )
 if [ "${{STATE:-}}" != "RUNNING" ] || [ -z "${{JOBID:-}}" ] || [ -z "${{NODE:-}}" ]; then
   alarm "scitex-ci: supervisor allocation DOWN" \\
-    "lease '$LEASE_NAME' on $HOST is not RUNNING (state='${{STATE:-none}}'). Rebook with: scitex-hpc ci-runners book-supervisor ... (operator action)."
+    "{target_ident} on $HOST is not RUNNING (state='${{STATE:-none}}'). {recover_hint}"
   echo "$TS CRITICAL allocation-down state=${{STATE:-none}}"
   exit 2
 fi

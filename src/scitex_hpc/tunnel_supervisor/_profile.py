@@ -33,6 +33,12 @@ class TunnelProfile:
         The shell command that starts the tunnel/service. Runs in the
         FOREGROUND inside the keep-alive loop — it must BLOCK until the
         tunnel/service dies (e.g. ``ssh -N -L 8080:127.0.0.1:8080 host``).
+        The string is spliced **raw and unquoted** into the generated loop
+        (``( {command} ) & wait $!``) and runs under ``set -u``, so it must
+        be a single shell-safe line — the caller is responsible for shell
+        quoting. This is the opaque seam: scitex-ssh's ``tunnel render-argv``
+        output (a bare ``ssh …`` string) drops in here verbatim; no tunnel
+        argv is constructed inside scitex_hpc.
     sentinel_path
         Path to the sentinel file. The keep-alive loop runs
         ``while [ -f sentinel_path ]; do ...; done`` — deleting this file

@@ -33,3 +33,13 @@ def test_jobs_spec_runs_the_watch_command():
     spec = jobs()[0]
     # Assert — the cron command is the watch entrypoint, not piped bash
     assert spec.command == "scitex-hpc ci-runners watch"
+
+
+def test_jobs_includes_the_inode_quota_warn_spec():
+    # Arrange
+    pytest.importorskip("scitex_dev.jobs")
+    from scitex_hpc.ci_runners._jobs import jobs
+    # Act
+    names = [spec.name for spec in jobs()]
+    # Assert
+    assert "scitex-hpc.inode-quota-warn" in names

@@ -41,5 +41,18 @@ def jobs():
                 "unregistered (3)."
             ),
             timeout_sec=120,
-        )
+        ),
+        JobSpec(
+            name="scitex-hpc.inode-quota-warn",
+            kind="cron",
+            schedule="*/30 * * * *",
+            command="scitex-hpc quota check",
+            description=(
+                "Early warning for the GPFS inode-quota wall: df -i the "
+                "tracked filesets and alarm via $SCITEX_CI_ALARM_CMD (exit "
+                "1) when any is at/over 90%, so a fileset is never silently "
+                "exhausted (the failure mode that breaks SAC state-dbs)."
+            ),
+            timeout_sec=120,
+        ),
     ]

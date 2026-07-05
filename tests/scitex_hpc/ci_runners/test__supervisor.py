@@ -1,0 +1,237 @@
+"""Tests for the supervisor hold-body generator."""
+
+from __future__ import annotations
+
+from scitex_hpc.ci_runners import (
+    FleetSpec,
+    RunnerSpec,
+    build_supervisor_hold_body,
+    runner_keepalive_fragment,
+)
+
+CI_BASE = "/data/gpfs/projects/punim0264/ywatanabe/ci"
+
+
+def _fleet(*names: str) -> FleetSpec:
+    runners = [
+        RunnerSpec(name=n, dir=f"{CI_BASE}/actions-runner-{n}") for n in names
+    ]
+    return FleetSpec(ci_base=CI_BASE, runners=runners)
+
+
+def test_fragment_runs_run_sh():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert "./run.sh" in frag
+
+
+def test_fragment_clears_stale_temp_before_restart():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — a stale _work/_temp would crash the runner at startup
+    assert 'rm -rf "$wd/_temp"' in frag
+
+
+def test_fragment_symlinks_work_to_local_disk():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — _work must point at local xfs (GPFS races break temp-init)
+    assert 'ln -sfn "$wd" "$d/_work"' in frag
+
+
+def test_fragment_moves_real_work_aside_before_symlink():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — mv (atomic, busy-safe) so ln -sfn replaces a real _work dir
+    assert 'mv "$d/_work"' in frag
+
+
+def test_fragment_path_includes_user_bin():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — ~/.bin holds gh; non-interactive shells skip .bashrc's PATH add
+    assert "$HOME/.bin:" in frag
+
+
+def test_fragment_loops_for_restart():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — a while loop is what gives auto-restart
+    assert "while [ -f" in frag
+
+
+def test_fragment_uses_backoff_value():
+    # Arrange
+    r = RunnerSpec(name="x", dir=f"{CI_BASE}/actions-runner-x")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=42)
+    # Assert
+    assert "sleep 42" in frag
+
+
+def test_fragment_backgrounds_the_loop():
+    # Arrange
+    r = RunnerSpec(name="x", dir=f"{CI_BASE}/actions-runner-x")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=1)
+    # Assert — trailing ` &` backgrounds the keep-alive function
+    assert frag.rstrip().endswith("&")
+
+
+def test_body_includes_every_runner():
+    # Arrange
+    fleet = _fleet("a", "b", "c")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert
+    assert body.count("./run.sh") == 3
+
+
+def test_body_ends_with_wait():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — the supervisor blocks on wait as the job's main process
+    assert body.rstrip().endswith("wait")
+
+
+def test_body_scrubs_easybuild_env():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — env hardening removes the easybuild module paths
+    assert "grep -v easybuild" in body
+
+
+def test_body_sets_job_completed_hook():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — per-job hook so back-to-back jobs don't collide on stale _temp
+    assert "ACTIONS_RUNNER_HOOK_JOB_COMPLETED" in body
+
+
+def test_body_hook_clears_runner_temp():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — the hook rm -rf's the finished job's temp
+    assert 'rm -rf "$RUNNER_TEMP"' in body
+
+
+def test_body_respects_exclude():
+    # Arrange
+    fleet = _fleet("a", "b")
+    fleet.exclude = ("b",)
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert
+    assert "actions-runner-b" not in body
+
+
+def test_body_provisions_toolcache():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — a fresh node self-heals the setup-python interpreter cache
+    assert "_provision_toolcache" in body
+
+
+def test_body_provision_writes_complete_marker():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — interpreters laid out in setup-python's $CACHE/<ver>/x64 layout
+    assert "x64.complete" in body
+
+
+def test_body_provision_is_non_fatal():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — a provisioning hiccup must never block runner launch
+    assert "_provision_toolcache || true" in body
+
+
+def test_body_provision_substitutes_toolcache_placeholder():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — no unsubstituted template tokens leak into the shell body
+    assert "__TOOLCACHE__" not in body
+
+
+def test_body_overrides_tmpdir_to_local_disk():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — CI tmp on node-local disk under work_root, not under $HOME
+    assert f'export TMPDIR="{fleet.work_root}/tmp"' in body
+
+
+def test_body_tmpdir_override_comes_after_bashrc_source():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — the override must win over the profile's TMPDIR=$HOME/.cache/tmp
+    assert body.index('source "$HOME/.bashrc"') < body.index("export TMPDIR=")
+
+
+def test_body_path_prepends_user_bin():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — release-tail gh (in ~/.bin) must resolve in the non-interactive
+    # supervisor; ~/.bashrc only adds ~/.bin for interactive shells
+    assert 'export PATH="$HOME/.bin:$HOME/.local/bin:$HOME/.cargo/bin:' in body
+
+
+def test_body_scrubs_inherited_secret_env_vars():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — a loop over the env unsets secret-pattern vars the profile leaked
+    assert "compgen -v" in body
+
+
+def test_body_scrub_covers_password_pattern():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — passwords (email/SSO/Visa) must be stripped from the job env
+    assert "*PASSWORD*" in body
+
+
+def test_body_scrub_covers_token_pattern():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — OAuth/bearer tokens must be stripped from the job env
+    assert "*TOKEN*" in body

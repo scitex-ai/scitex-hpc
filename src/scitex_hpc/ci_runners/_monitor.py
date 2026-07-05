@@ -58,6 +58,7 @@ def build_monitor_script(
     host: str,
     lease_name: str,
     overlap_jobid: str | None = None,
+    overlap_jobid_file: str | None = None,
 ) -> str:
     """Return a self-contained POSIX ``bash`` health-monitor script.
 
@@ -73,13 +74,49 @@ def build_monitor_script(
     false-alarm "allocation DOWN" every tick. Both paths key the per-runner
     listener check off the resolved job id, so step 2 is identical.
 
+    ``overlap_jobid_file`` is the durable form used by ``ci-runners watch``:
+    instead of a build-time id, the script reads the current holder id from
+    a file on the cluster (written by exec-supervisor) at RUNTIME — so it
+    survives the id churn of a walltime-resubmit. A missing/empty file exits
+    3 ("supervisor UNREGISTERED"), distinct from exit 2 (allocation down),
+    rather than false-alarming a live-but-unnamed overlap step.
+
     The generated script is idempotent and read-mostly: its only write to
     the cluster is, when a runner's listener is missing, to *touch* a
     per-runner ``.needs-restart`` marker the supervisor loop notices — it
     never kills the supervisor or any live runner. Allocation rebooking /
     supervisor re-exec stays a deliberate operator action.
     """
-    if overlap_jobid:
+    resolve_preamble = ""
+    if overlap_jobid_file:
+        # Resolve the holder id at RUNTIME from the supervisor's runtime
+        # file (survives walltime-resubmit id churn). A missing/empty file
+        # means the supervisor never registered -> a DISTINCT exit 3, not a
+        # false "allocation DOWN".
+        squeue_selector = "--job=$HOLDER_JOBID"
+        target_ident = "holder job $HOLDER_JOBID"
+        recover_hint = (
+            "the supervisor runs as an --overlap step; re-exec with: "
+            "scitex-hpc ci-runners exec-supervisor --overlap-jobid "
+            "<holder> ... (operator action)"
+        )
+        resolve_preamble = (
+            "# --- 0. resolve holder job id from the supervisor runtime "
+            "file --\n"
+            'HOLDER_JOBID="$(ssh "$HOST" bash -lc '
+            f"'cat {overlap_jobid_file} 2>/dev/null'"
+            ' 2>/dev/null | tr -dc "0-9")"\n'
+            'if [ -z "$HOLDER_JOBID" ]; then\n'
+            '  alarm "scitex-ci: supervisor UNREGISTERED" \\\n'
+            f'    "no holder jobid at {overlap_jobid_file} on $HOST -- the '
+            "supervisor never started or its runtime file was cleared. "
+            "Launch: scitex-hpc ci-runners exec-supervisor --overlap-jobid "
+            '<holder> (operator action)."\n'
+            '  echo "$TS CRITICAL supervisor-unregistered"\n'
+            "  exit 3\n"
+            "fi\n"
+        )
+    elif overlap_jobid:
         squeue_selector = f"--job={overlap_jobid}"
         target_ident = f"holder job {overlap_jobid}"
         recover_hint = (
@@ -116,6 +153,7 @@ declare -A RUNNER_DIRS=(
 RUNNER_NAMES="{names}"
 TS="$(date -u +%FT%TZ)"
 
+{resolve_preamble}
 # --- 1. resolve the supervisor allocation (job id + node) ------------
 # A single login-shell SSH does the squeue lookup; everything else keys
 # off the resolved JOBID so we never re-query the scheduler per runner.

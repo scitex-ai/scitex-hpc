@@ -48,6 +48,9 @@ Documentation = "https://scitex-hpc.readthedocs.io"
 [project.entry-points."scitex_dev.skills"]
 scitex-hpc = "scitex_hpc"
 
+[project.entry-points."scitex_dev.jobs"]
+scitex-hpc = "scitex_hpc.ci_runners._jobs:jobs"
+
 [project.scripts]
 scitex-hpc = "scitex_hpc._cli:main"
 

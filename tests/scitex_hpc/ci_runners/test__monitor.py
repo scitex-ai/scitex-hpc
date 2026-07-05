@@ -122,6 +122,54 @@ def test_monitor_overlap_jobid_still_never_scancels():
     assert "scancel" not in script
 
 
+def test_monitor_jobid_file_resolves_holder_from_file():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(
+        fleet, host="spartan", lease_name="fleet",
+        overlap_jobid_file="$HOME/.scitex/hpc/runtime/holder.jobid",
+    )
+    # Assert — reads the id from the file at runtime, not a build-time const
+    assert "HOLDER_JOBID=" in script
+
+
+def test_monitor_jobid_file_exits_3_when_unregistered():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(
+        fleet, host="spartan", lease_name="fleet",
+        overlap_jobid_file="$HOME/.scitex/hpc/runtime/holder.jobid",
+    )
+    # Assert — a missing/empty file is a DISTINCT exit (not false allocation-down)
+    assert "exit 3" in script
+
+
+def test_monitor_jobid_file_squeue_uses_resolved_id():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(
+        fleet, host="spartan", lease_name="fleet",
+        overlap_jobid_file="$HOME/.scitex/hpc/runtime/holder.jobid",
+    )
+    # Assert — the scheduler lookup keys off the file-resolved id
+    assert "--job=$HOLDER_JOBID" in script
+
+
+def test_monitor_jobid_file_still_never_scancels():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(
+        fleet, host="spartan", lease_name="fleet",
+        overlap_jobid_file="$HOME/.scitex/hpc/runtime/holder.jobid",
+    )
+    # Assert
+    assert "scancel" not in script
+
+
 def test_archive_is_non_destructive():
     # Arrange
     home = "~"

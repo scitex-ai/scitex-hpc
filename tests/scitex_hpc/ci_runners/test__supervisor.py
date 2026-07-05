@@ -55,6 +55,15 @@ def test_fragment_moves_real_work_aside_before_symlink():
     assert 'mv "$d/_work"' in frag
 
 
+def test_fragment_path_includes_user_bin():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — ~/.bin holds gh; non-interactive shells skip .bashrc's PATH add
+    assert "$HOME/.bin:" in frag
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
@@ -189,6 +198,16 @@ def test_body_tmpdir_override_comes_after_bashrc_source():
     body = build_supervisor_hold_body(fleet)
     # Assert — the override must win over the profile's TMPDIR=$HOME/.cache/tmp
     assert body.index('source "$HOME/.bashrc"') < body.index("export TMPDIR=")
+
+
+def test_body_path_prepends_user_bin():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — release-tail gh (in ~/.bin) must resolve in the non-interactive
+    # supervisor; ~/.bashrc only adds ~/.bin for interactive shells
+    assert 'export PATH="$HOME/.bin:$HOME/.local/bin:$HOME/.cargo/bin:' in body
 
 
 def test_body_scrubs_inherited_secret_env_vars():

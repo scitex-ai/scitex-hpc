@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 from scitex_hpc.ci_runners import (
     FleetSpec,
     RunnerSpec,
     build_supervisor_hold_body,
     runner_keepalive_fragment,
 )
+from scitex_hpc.ci_runners._supervisor import _TOOLCACHE_PROVISION
 
 CI_BASE = "/data/gpfs/projects/punim0264/ywatanabe/ci"
 
@@ -180,6 +185,73 @@ def test_body_provision_substitutes_toolcache_placeholder():
     body = build_supervisor_hold_body(fleet)
     # Assert — no unsubstituted template tokens leak into the shell body
     assert "__TOOLCACHE__" not in body
+
+
+def test_body_provision_checks_interpreter_resolves_not_just_marker():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — detection runs the interpreter (dangling-symlink safe), not
+    # merely an ``ls`` of the x64.complete marker
+    assert "x64/bin/python3" in body
+
+
+# ---------------------------------------------------------------------------
+# _provision_toolcache detection — behavioral (real bash over a synthetic cache)
+# ---------------------------------------------------------------------------
+
+
+def _seed_healthy(cache: str, full: str) -> None:
+    """Lay a resolvable interpreter + marker at $cache/Python/<full>/x64."""
+    binroot = os.path.join(cache, "Python", full, "x64", "bin")
+    os.makedirs(binroot)
+    os.symlink(sys.executable, os.path.join(binroot, "python3"))
+    open(os.path.join(cache, "Python", full, "x64.complete"), "w").close()
+
+
+def _run_provision(cache: str, work: str) -> str:
+    """Run the real provisioning fragment; return its stderr.
+
+    A no-op fake ``uv`` is seeded so the re-provision path never touches the
+    network — the assertions only look at which versions the detection flags
+    for provisioning (echoed to stderr before any uv/install work).
+    """
+    os.makedirs(os.path.join(work, "tooling"))
+    uv = os.path.join(work, "tooling", "uv")
+    with open(uv, "w") as fh:
+        fh.write("#!/bin/bash\nexit 0\n")
+    os.chmod(uv, 0o755)
+    frag = _TOOLCACHE_PROVISION.replace("__TOOLCACHE__", cache).replace(
+        "__WORK_ROOT__", work
+    )
+    proc = subprocess.run(["bash", "-c", frag], capture_output=True, text=True)
+    return proc.stderr
+
+
+def test_provision_is_noop_when_all_interpreters_resolve(tmp_path):
+    # Arrange
+    cache = str(tmp_path / "tc")
+    for full in ("3.11.15", "3.12.13", "3.13.14"):
+        _seed_healthy(cache, full)
+    # Act
+    stderr = _run_provision(cache, str(tmp_path / "work"))
+    # Assert — a healthy cache does not re-provision
+    assert "provisioning" not in stderr
+
+
+def test_provision_reprovisions_on_dangling_symlink_despite_marker(tmp_path):
+    # Arrange — 3.11 + 3.13 healthy; 3.12 has its marker but a DANGLING x64
+    cache = str(tmp_path / "tc")
+    for full in ("3.11.15", "3.13.14"):
+        _seed_healthy(cache, full)
+    os.makedirs(os.path.join(cache, "Python", "3.12.13"))
+    os.symlink("/nonexistent-toolcache-src", os.path.join(cache, "Python", "3.12.13", "x64"))
+    open(os.path.join(cache, "Python", "3.12.13", "x64.complete"), "w").close()
+    # Act
+    stderr = _run_provision(cache, str(tmp_path / "work"))
+    # Assert — the dead 3.12 link is detected and re-provisioned
+    assert "3.12" in stderr
 
 
 def test_body_overrides_tmpdir_to_local_disk():

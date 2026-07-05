@@ -43,20 +43,6 @@ for _name in $(compgen -v 2>/dev/null); do
   case "$_name" in
     *PASSWORD*|*PASSWD*|*TOKEN*|*SECRET*|*API_KEY*|*APIKEY*|*_KEY|*_KEYS|*BEARER*|*CREDENTIAL*|*CONSUMER_KEY*|*ACCESS_KEY*|*PRIVATE_KEY*)
       unset "$_name" 2>/dev/null || true ;;
-    # App-data/app-config junk from the sourced interactive profile: the
-    # MNE_DATA incident (scitex-dsp v0.2.0 release CI, 2026-07) -- a stale
-    # MNE_DATA pointing at a nonexistent path leaked into an apptainer exec
-    # and killed MNE-importing tests. Pattern-based (not just MNE_DATA)
-    # because the same profile sets other app-specific *_DATA / *_DATA_DIR
-    # / *_CACHE_DIR / *_CONFIG_DIR vars that have no business inside a CI
-    # runner process either. Deliberately narrower than "*_HOME" or
-    # "*_CACHE_HOME"/"*_CONFIG_HOME"/"*_DATA_HOME": those shapes collide
-    # with widely-used, legitimately-needed vars (JAVA_HOME, CONDA_HOME,
-    # ANDROID_HOME, the XDG_DATA_HOME/XDG_CACHE_HOME/XDG_CONFIG_HOME base
-    # dir spec) that CI tooling may genuinely rely on, so they are left
-    # alone here.
-    *_DATA|*_DATA_DIR|*_CACHE_DIR|*_CONFIG_DIR)
-      unset "$_name" 2>/dev/null || true ;;
   esac
 done
 unset _name

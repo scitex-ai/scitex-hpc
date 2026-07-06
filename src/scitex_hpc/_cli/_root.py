@@ -25,7 +25,7 @@ PKG = "scitex-hpc"
 COMMAND_CATEGORIES = [
     ("Leases", ["lease"]),
     ("CI runners", ["ci-runners"]),
-    ("Login-node guard", ["login-guardrail"]),
+    ("Login-node guard", ["sentinel"]),
     ("Tunnel supervisor", ["tunnel-supervisor"]),
     ("Introspection", ["list-python-apis", "mcp", "skills"]),
     ("Shell", ["install-shell-completion", "print-shell-completion"]),

@@ -1,4 +1,4 @@
-"""``scitex-hpc login-guardrail`` group — Spartan login-node compute guard.
+"""``scitex-hpc sentinel`` group — Spartan login-node compute guard.
 
 Subcommands:
 
@@ -34,7 +34,7 @@ from ..login_guard import (
 _PROFILE_CHOICE = click.Choice(sorted(PROFILES))
 
 
-@click.group("login-guardrail")
+@click.group("sentinel")
 def login_guard() -> None:
     """HPC login-node guardrail (heavy compute + protected-path du/find).
 
@@ -69,9 +69,9 @@ def show_cmd(profile: str, script: bool, as_json: bool) -> None:
 
     \b
     Example:
-      $ scitex-hpc login-guardrail show
-      $ scitex-hpc login-guardrail show --profile spartan --script
-      $ scitex-hpc login-guardrail show --json
+      $ scitex-hpc sentinel show
+      $ scitex-hpc sentinel show --profile spartan --script
+      $ scitex-hpc sentinel show --json
     """
     prof = get_profile(profile)
     content = build_install_script(profile=prof) if script else guard_text(prof)
@@ -119,8 +119,8 @@ def install_cmd(profile: str, host: str, dry_run: bool, yes: bool) -> None:
 
     \b
     Example:
-      $ scitex-hpc login-guardrail install --host spartan        # dry-run
-      $ scitex-hpc login-guardrail install --host spartan --yes
+      $ scitex-hpc sentinel install --host spartan        # dry-run
+      $ scitex-hpc sentinel install --host spartan --yes
     """
     prof = get_profile(profile)
     # Safe by default: only a bare ``--yes`` leaves dry-run and deploys.
@@ -141,6 +141,6 @@ def install_cmd(profile: str, host: str, dry_run: bool, yes: bool) -> None:
         click.echo(res.stderr, err=True)
     rc = getattr(res, "returncode", 0)
     if rc != 0:
-        click.echo(f"login-guardrail install failed (rc={rc})", err=True)
+        click.echo(f"sentinel install failed (rc={rc})", err=True)
         sys.exit(rc)
     click.echo(f"installed: login-node guard on {host} ({REMOTE_GUARD_PATH})")

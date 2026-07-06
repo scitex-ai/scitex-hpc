@@ -1,4 +1,4 @@
-"""CLI tests for the ``login-guardrail`` group (rename + convention flags).
+"""CLI tests for the ``sentinel`` group (rename + convention flags).
 
 Pure text paths only: ``show`` renders from the profile and ``install``
 without ``--yes`` stays in dry-run, so nothing SSHes to a cluster.
@@ -13,7 +13,7 @@ from scitex_hpc._cli import main
 
 def test_group_registered_under_noun_name(capsys):
     # Arrange
-    argv = ["login-guardrail", "--help"]
+    argv = ["sentinel", "--help"]
     # Act
     rc = main(argv)
     # Assert — the audit-§1 noun group name resolves
@@ -23,7 +23,7 @@ def test_group_registered_under_noun_name(capsys):
 
 def test_show_prints_guard_with_blocked_token(capsys):
     # Arrange
-    argv = ["login-guardrail", "show"]
+    argv = ["sentinel", "show"]
     # Act
     main(argv)
     # Assert — the rendered guard carries the cross-repo [BLOCKED] contract
@@ -33,7 +33,7 @@ def test_show_prints_guard_with_blocked_token(capsys):
 
 def test_show_json_emits_object(capsys):
     # Arrange
-    argv = ["login-guardrail", "show", "--json"]
+    argv = ["sentinel", "show", "--json"]
     # Act
     main(argv)
     # Assert — machine-readable output has the documented keys
@@ -43,7 +43,7 @@ def test_show_json_emits_object(capsys):
 
 def test_show_json_kind_is_guard_by_default(capsys):
     # Arrange
-    argv = ["login-guardrail", "show", "--json"]
+    argv = ["sentinel", "show", "--json"]
     # Act
     main(argv)
     # Assert
@@ -53,7 +53,7 @@ def test_show_json_kind_is_guard_by_default(capsys):
 
 def test_install_dry_run_by_default_does_not_deploy(capsys):
     # Arrange — no --yes => dry-run => never SSHes
-    argv = ["login-guardrail", "install", "--host", "spartan"]
+    argv = ["sentinel", "install", "--host", "spartan"]
     # Act
     rc = main(argv)
     # Assert
@@ -63,7 +63,7 @@ def test_install_dry_run_by_default_does_not_deploy(capsys):
 
 def test_install_dry_run_prints_install_script(capsys):
     # Arrange
-    argv = ["login-guardrail", "install"]
+    argv = ["sentinel", "install"]
     # Act
     main(argv)
     # Assert — the dry-run shows the exact install script for review

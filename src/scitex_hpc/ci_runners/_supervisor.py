@@ -202,6 +202,45 @@ def runner_keepalive_fragment(
     )
 
 
+def diag_pruner_fragment(fleet: FleetSpec) -> str:
+    """Return a backgrounded loop that bounds each runner's ``_diag`` dir.
+
+    The GitHub runner writes a ``Worker_*.log`` per job plus rotating
+    ``Runner_*.log`` into ``<install>/_diag`` on GPFS. Across a long-lived
+    ``run.sh`` session these accumulate unbounded and consume shared-fileset
+    inodes — a contributor to the 2026-07-06 punim0264 inode wall that took
+    the whole CI fleet down (a Worker cannot even start when the fileset has
+    no free inodes). This loop keeps only the newest ``fleet.diag_keep`` of
+    each log kind per active runner, every ``fleet.diag_prune_interval``
+    seconds, until the supervisor sentinel is removed.
+
+    Pure log hygiene: it only ever deletes *older* diag logs (never the
+    active one — ``ls -t`` keeps the newest), and never touches ``_work`` or
+    any live job state. Runs as its own backgrounded loop (not the per-run
+    keep-alive) because a healthy runner keeps ``run.sh`` connected for days,
+    so a per-restart prune would almost never fire.
+    """
+    keep = fleet.diag_keep
+    interval = fleet.diag_prune_interval
+    # Space-joined install dirs (names are ``actions-runner-*`` — no spaces),
+    # matching how the rest of this module treats runner paths.
+    dirs = " ".join(f'"{r.dir}"' for r in fleet.active())
+    return (
+        "_scitex_ci_diag_pruner() {\n"
+        f"  while [ -f {_sentinel()} ]; do\n"
+        f"    for d in {dirs}; do\n"
+        f'      ls -t "$d"/_diag/Worker_*.log 2>/dev/null '
+        f"| tail -n +{keep + 1} | xargs -r rm -f 2>/dev/null\n"
+        f'      ls -t "$d"/_diag/Runner_*.log 2>/dev/null '
+        f"| tail -n +{keep + 1} | xargs -r rm -f 2>/dev/null\n"
+        "    done\n"
+        f"    sleep {interval}\n"
+        "  done\n"
+        "}\n"
+        "_scitex_ci_diag_pruner &\n"
+    )
+
+
 def build_supervisor_hold_body(fleet: FleetSpec) -> str:
     """Assemble the full sbatch hold body that supervises ``fleet``.
 
@@ -210,9 +249,11 @@ def build_supervisor_hold_body(fleet: FleetSpec) -> str:
       1. env hardening (shared)
       2. a sentinel file marking "supervisor live" (loops watch it)
       3. one backgrounded keep-alive loop per active runner
-      4. a SIGTERM/SIGINT trap that removes the sentinel so loops exit
+      4. a backgrounded ``_diag`` log pruner bounding each runner's log dir
+         (keeps GPFS inode use flat — see :func:`diag_pruner_fragment`)
+      5. a SIGTERM/SIGINT trap that removes the sentinel so loops exit
          cleanly on scancel
-      5. ``wait`` — block as the job's main process until SLURM tears
+      6. ``wait`` — block as the job's main process until SLURM tears
          the job down (or the resubmit trap fires, added by Reservation)
 
     The returned string is the ``hold_body`` argument for
@@ -247,6 +288,7 @@ def build_supervisor_hold_body(fleet: FleetSpec) -> str:
         )
         for r in active
     )
+    pruner = diag_pruner_fragment(fleet)
     tail = (
         '\necho "[scitex-ci] all keep-alive loops launched; supervising" >&2\n'
         "# Block as the job's main process. Reservation(persistent=True)\n"
@@ -254,7 +296,7 @@ def build_supervisor_hold_body(fleet: FleetSpec) -> str:
         "# resubmit a fresh supervisor takes over the new allocation.\n"
         "wait\n"
     )
-    return head + loops + tail
+    return head + loops + pruner + tail
 
 
 def _sentinel() -> str:

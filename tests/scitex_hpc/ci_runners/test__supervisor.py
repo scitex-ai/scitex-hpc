@@ -7,9 +7,11 @@ import subprocess
 import sys
 
 from scitex_hpc.ci_runners import (
+    DEFAULT_DIAG_KEEP,
     FleetSpec,
     RunnerSpec,
     build_supervisor_hold_body,
+    diag_pruner_fragment,
     runner_keepalive_fragment,
 )
 from scitex_hpc.ci_runners._supervisor import _TOOLCACHE_PROVISION
@@ -307,3 +309,83 @@ def test_body_scrub_covers_token_pattern():
     body = build_supervisor_hold_body(fleet)
     # Assert — OAuth/bearer tokens must be stripped from the job env
     assert "*TOKEN*" in body
+
+
+# ---------------------------------------------------------------------------
+# _diag log pruner — bounds each runner's _diag inode footprint
+# ---------------------------------------------------------------------------
+
+
+def test_pruner_bounds_worker_logs_to_diag_keep():
+    # Arrange
+    fleet = _fleet("scitex-hpc")
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert — keep newest DEFAULT_DIAG_KEEP, delete the rest (tail -n +N+1)
+    assert f'ls -t "$d"/_diag/Worker_*.log 2>/dev/null | tail -n +{DEFAULT_DIAG_KEEP + 1}' in frag
+
+
+def test_pruner_bounds_runner_logs_too():
+    # Arrange
+    fleet = _fleet("scitex-hpc")
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert
+    assert '/_diag/Runner_*.log 2>/dev/null | tail -n +' in frag
+
+
+def test_pruner_loops_on_the_supervisor_sentinel():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert — the pruner exits when the supervisor removes the sentinel
+    assert "while [ -f /tmp/scitex-ci-supervisor.alive ]; do" in frag
+
+
+def test_pruner_honours_diag_keep_override():
+    # Arrange
+    fleet = _fleet("a")
+    fleet.diag_keep = 5
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert
+    assert "tail -n +6" in frag
+
+
+def test_pruner_honours_prune_interval_override():
+    # Arrange
+    fleet = _fleet("a")
+    fleet.diag_prune_interval = 111
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert
+    assert "sleep 111" in frag
+
+
+def test_pruner_iterates_only_active_runners():
+    # Arrange — exclude one runner; it must not appear in the prune loop
+    fleet = _fleet("a", "b")
+    fleet.exclude = ("b",)
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert
+    assert "actions-runner-b" not in frag
+
+
+def test_pruner_deletes_only_via_rm_f_of_older_logs():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    frag = diag_pruner_fragment(fleet)
+    # Assert — pure log hygiene: only ever xargs rm -f the tail (older) logs
+    assert "xargs -r rm -f" in frag
+
+
+def test_body_launches_the_diag_pruner():
+    # Arrange
+    fleet = _fleet("a", "b")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — the supervisor body backgrounds the pruner loop
+    assert "_scitex_ci_diag_pruner &" in body

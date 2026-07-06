@@ -10,6 +10,9 @@ Subcommands:
     ALREADY-RUNNING allocation via ``srun --jobid=<holder> --overlap``,
     for when a dedicated node won't schedule. Same ``--confirm`` gate.
   * ``show-monitor`` — emit the cron-driven health-monitor script.
+  * ``show-register`` — print the ``config.sh`` command that registers a
+    runner WITH the ``scitex-ci`` label baked in (closes label drift at
+    the source, so a re-registered runner never queues its repo's CI).
   * ``show-archive`` — emit a script that archives the old ``~`` band-aid
     scripts to ``.old/<timestamp>/`` on the cluster (the operator runs it
     AFTER cutover; live runners still depend on the band-aids until then).
@@ -44,6 +47,7 @@ from ..ci_runners._overlap import (
     DEFAULT_HOLDER_JOBID_PATH,
     DEFAULT_LOG_PATH,
 )
+from ..ci_runners._register import DEFAULT_RUNNER_LABELS, build_register_command
 
 # Spartan default CI base (overridable). Documented, not magic: this is
 # where the 72 install dirs live today.
@@ -410,6 +414,73 @@ def watch_cmd(host, ci_base, exclude, jobid_file):
     )
     proc = subprocess.run(["bash", "-c", script])
     sys.exit(proc.returncode)
+
+
+@ci_runners.command("show-register")
+@click.option(
+    "--url",
+    required=True,
+    help="Repo or org URL the runner registers to "
+    "(e.g. https://github.com/ywatanabe1989/scitex-hpc).",
+)
+@click.option("--name", required=True, help="Runner name (install-dir tag).")
+@click.option(
+    "--token",
+    default="<TOKEN>",
+    help="Registration token from GitHub → Settings → Actions → Runners → "
+    "New (short-lived; default prints a <TOKEN> placeholder to fill in).",
+)
+@click.option(
+    "--label",
+    "labels",
+    multiple=True,
+    help="Extra label(s) to register with (repeatable). scitex-ci is ALWAYS "
+    f"added even if omitted. Default: {','.join(DEFAULT_RUNNER_LABELS)}.",
+)
+@click.option(
+    "--work", default=None, help="Runner _work dir (keep off the home quota)."
+)
+@click.option(
+    "--runner-group", "runner_group", default=None, help="Runner group name."
+)
+@click.option(
+    "--no-replace",
+    "no_replace",
+    is_flag=True,
+    help="Do NOT pass --replace (error instead of re-registering same name).",
+)
+@click.option("--json", "as_json", is_flag=True, help='Emit JSON ({"command": ...}).')
+def show_register_cmd(
+    url, name, token, labels, work, runner_group, no_replace, as_json
+):
+    """Show the ``config.sh`` command that registers a runner WITH ``scitex-ci``.
+
+    \b
+    The label the ci-template ``runs-on: [self-hosted, scitex-ci]`` selects
+    on is baked into every command this prints, so a re-registered or
+    freshly-stood-up runner can never drift back to the un-labelled state
+    that queues a repo's CI forever (the 2026-06-26 label-drift outage).
+    Print-only: run the emitted command on the cluster in the runner's
+    install dir with a fresh registration token.
+
+    \b
+    Example:
+      $ scitex-hpc ci-runners show-register \\
+          --url https://github.com/ywatanabe1989/scitex-hpc \\
+          --name scitex-hpc --work /tmp/scitex-ci-runner-work/scitex-hpc
+      ./config.sh --unattended --url https://github.com/... --token <TOKEN> \\
+          --name scitex-hpc --labels spartan-cpu,scitex-ci --work ... --replace
+    """
+    command = build_register_command(
+        url=url,
+        name=name,
+        token=token,
+        labels=tuple(labels) if labels else DEFAULT_RUNNER_LABELS,
+        work=work,
+        runner_group=runner_group,
+        replace=not no_replace,
+    )
+    click.echo(_json.dumps({"command": command}) if as_json else command)
 
 
 @ci_runners.command("show-archive")

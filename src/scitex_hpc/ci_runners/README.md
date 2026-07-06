@@ -70,6 +70,10 @@ chmod +x ~/.scitex/ci/monitor.sh
 
 # 5. (post-cutover) generate the band-aid archival script
 scitex-hpc ci-runners show-archive --out /tmp/archive-bandaids.sh
+
+# Registering / re-installing a runner (bakes the scitex-ci label in)
+scitex-hpc ci-runners show-register \
+  --url https://github.com/ywatanabe1989/scitex-hpc --name scitex-hpc
 ```
 
 Defaults target Spartan's `cascade` partition (32 cores / 128 GB / 7-day

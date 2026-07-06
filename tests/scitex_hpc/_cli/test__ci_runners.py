@@ -109,3 +109,47 @@ def test_no_runners_exits_2(capsys):
     # Assert
     err = capsys.readouterr().err
     assert rc == 2 and "no runners" in err
+
+
+def test_show_register_bakes_scitex_ci_label(capsys):
+    # Arrange
+    argv = [
+        "ci-runners",
+        "show-register",
+        "--url",
+        "https://github.com/ywatanabe1989/scitex-hpc",
+        "--name",
+        "scitex-hpc",
+    ]
+    # Act
+    rc = main(argv)
+    # Assert — the label the ci-template selects on is always emitted
+    out = capsys.readouterr().out
+    assert rc == 0 and "--labels spartan-cpu,scitex-ci" in out
+
+
+def test_show_register_requires_url(capsys):
+    # Arrange — --url is a required option
+    argv = ["ci-runners", "show-register", "--name", "scitex-hpc"]
+    # Act
+    rc = main(argv)
+    # Assert
+    assert rc != 0
+
+
+def test_show_register_json_emits_command_key(capsys):
+    # Arrange
+    argv = [
+        "ci-runners",
+        "show-register",
+        "--url",
+        "https://github.com/ywatanabe1989/scitex-hpc",
+        "--name",
+        "x",
+        "--json",
+    ]
+    # Act
+    main(argv)
+    # Assert
+    out = capsys.readouterr().out
+    assert '"command"' in out

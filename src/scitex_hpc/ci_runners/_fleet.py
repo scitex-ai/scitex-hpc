@@ -21,6 +21,13 @@ RUNNER_DIR_PREFIX = "actions-runner-"
 # GitHub, short enough that a transient blip self-heals within a minute.
 DEFAULT_RESTART_BACKOFF_SECONDS = 15
 
+# How many of each runner ``_diag`` log kind (Worker_*, Runner_*) to keep,
+# and how often the supervisor prunes the rest. 20 keeps enough recent
+# history to debug a failure while bounding the inode footprint; hourly is
+# frequent enough that a busy runner's per-job logs never pile up for long.
+DEFAULT_DIAG_KEEP = 20
+DEFAULT_DIAG_PRUNE_INTERVAL_SECONDS = 3600
+
 # A self-hosted runner install dir must contain ``run.sh`` to be a valid
 # launch target. We also tolerate dirs that only have ``config.sh`` (not
 # yet started) but skip them at launch — surfaced, not silently dropped.
@@ -72,6 +79,14 @@ class FleetSpec:
     toolcache: str = "$HOME/.runner-toolcache"
     work_root: str = "/tmp/scitex-ci-runner-work"
     restart_backoff: int = DEFAULT_RESTART_BACKOFF_SECONDS
+    # Bound each runner's ``_diag`` log dir. The GitHub runner writes a
+    # ``Worker_*.log`` per job plus rotating ``Runner_*.log`` into
+    # ``<install>/_diag`` (on GPFS); across a long-lived session these grow
+    # unbounded and consume shared-fileset inodes — a contributor to the
+    # 2026-07-06 punim0264 inode wall that took CI down. The supervisor runs
+    # a periodic pruner keeping only the newest ``diag_keep`` of each kind.
+    diag_keep: int = DEFAULT_DIAG_KEEP
+    diag_prune_interval: int = DEFAULT_DIAG_PRUNE_INTERVAL_SECONDS
 
     def active(self) -> list[RunnerSpec]:
         """Runners that should be launched (excludes filtered out)."""

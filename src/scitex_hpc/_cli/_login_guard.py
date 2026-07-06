@@ -1,15 +1,15 @@
-"""``scitex-hpc login-guard`` group — Spartan login-node compute guard.
+"""``scitex-hpc login-guardrail`` group — Spartan login-node compute guard.
 
 Subcommands:
 
   * ``show`` — print the vendored guard script (the source of truth for
     the shell-function overrides), or the exact install script with
-    ``--script``.
+    ``--script``; ``--json`` wraps it as a machine-readable object.
   * ``install`` — deploy the guard to a host over SSH: copy it to
     ``~/.scitex/hpc/login-guard.sh``, ``chmod +x``, back up ``~/.bashrc``,
     ``bash -n``-validate a candidate, and idempotently insert the source
-    line above the interactive-return guard. Default ``--dry-run`` prints
-    the install script; pass ``--confirm`` to actually run it over SSH.
+    line above the interactive-return guard. Default is a DRY-RUN that
+    prints the install script; pass ``--yes`` to actually run it over SSH.
 
 The CLI only ever prints text (``show``/dry-run) or runs the explicit,
 self-validating install — it never executes anything on import.
@@ -17,6 +17,7 @@ self-validating install — it never executes anything on import.
 
 from __future__ import annotations
 
+import json as _json
 import sys
 
 import click
@@ -33,9 +34,9 @@ from ..login_guard import (
 _PROFILE_CHOICE = click.Choice(sorted(PROFILES))
 
 
-@click.group("login-guard")
+@click.group("login-guardrail")
 def login_guard() -> None:
-    """HPC login-node guard (heavy compute + protected-path du/find).
+    """HPC login-node guardrail (heavy compute + protected-path du/find).
 
     \b
     Config-driven via profiles (default: spartan). Shell-function overrides
@@ -57,19 +58,35 @@ def login_guard() -> None:
     is_flag=True,
     help="Show the remote INSTALL script instead of the guard itself.",
 )
-def show_cmd(profile: str, script: bool) -> None:
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help='Emit JSON ({"profile","kind","content"}) for machine consumers.',
+)
+def show_cmd(profile: str, script: bool, as_json: bool) -> None:
     """Print the rendered guard script (or the install script).
 
     \b
     Example:
-      $ scitex-hpc login-guard show
-      $ scitex-hpc login-guard show --profile spartan --script
+      $ scitex-hpc login-guardrail show
+      $ scitex-hpc login-guardrail show --profile spartan --script
+      $ scitex-hpc login-guardrail show --json
     """
     prof = get_profile(profile)
-    click.echo(
-        build_install_script(profile=prof) if script else guard_text(prof),
-        nl=False,
-    )
+    content = build_install_script(profile=prof) if script else guard_text(prof)
+    if as_json:
+        click.echo(
+            _json.dumps(
+                {
+                    "profile": prof.name,
+                    "kind": "install-script" if script else "guard",
+                    "content": content,
+                }
+            )
+        )
+        return
+    click.echo(content, nl=False)
 
 
 @login_guard.command("install")
@@ -81,26 +98,33 @@ def show_cmd(profile: str, script: bool) -> None:
 )
 @click.option("--host", default="spartan", help="SSH host (default: spartan).")
 @click.option(
-    "--confirm",
-    is_flag=True,
-    help="Actually deploy over SSH (default is dry-run: print the script).",
+    "--dry-run/--no-dry-run",
+    default=True,
+    help="Print the install script instead of deploying (default: dry-run).",
 )
-def install_cmd(profile: str, host: str, confirm: bool) -> None:
+@click.option(
+    "-y",
+    "--yes",
+    is_flag=True,
+    help="Deploy for real over SSH (required; overrides the default dry-run).",
+)
+def install_cmd(profile: str, host: str, dry_run: bool, yes: bool) -> None:
     """Deploy the guard to HOST over SSH (safe + idempotent).
 
     \b
     Copies the guard to ~/.scitex/hpc/login-guard.sh, backs up ~/.bashrc,
     bash -n-validates a candidate, and inserts the source line ABOVE the
     interactive-return guard (so non-interactive ``ssh host '<cmd>'`` is
-    covered too). Default is DRY-RUN.
+    covered too). Default is DRY-RUN; pass --yes to deploy.
 
     \b
     Example:
-      $ scitex-hpc login-guard install --host spartan          # dry-run
-      $ scitex-hpc login-guard install --host spartan --confirm
+      $ scitex-hpc login-guardrail install --host spartan        # dry-run
+      $ scitex-hpc login-guardrail install --host spartan --yes
     """
     prof = get_profile(profile)
-    if not confirm:
+    # Safe by default: only a bare ``--yes`` leaves dry-run and deploys.
+    if dry_run and not yes:
         click.echo(
             f"DRY RUN — would deploy {prof.name} guard to "
             f"{host}:{REMOTE_GUARD_PATH}\n"
@@ -108,7 +132,7 @@ def install_cmd(profile: str, host: str, confirm: bool) -> None:
             "--- install script ---"
         )
         click.echo(build_install_script(profile=prof), nl=False)
-        click.echo("\nRe-run with --confirm to deploy over SSH.")
+        click.echo("\nRe-run with --yes to deploy over SSH.")
         return
     res = install(profile=prof, host=host)
     if getattr(res, "stdout", ""):
@@ -117,6 +141,6 @@ def install_cmd(profile: str, host: str, confirm: bool) -> None:
         click.echo(res.stderr, err=True)
     rc = getattr(res, "returncode", 0)
     if rc != 0:
-        click.echo(f"login-guard install failed (rc={rc})", err=True)
+        click.echo(f"login-guardrail install failed (rc={rc})", err=True)
         sys.exit(rc)
     click.echo(f"installed: login-node guard on {host} ({REMOTE_GUARD_PATH})")

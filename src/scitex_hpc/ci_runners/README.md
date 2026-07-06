@@ -43,14 +43,20 @@ no SSH on import, nothing runs implicitly):
    within the restart backoff (default 15 s) with no human involvement.
    Booked via the existing `scitex_hpc.Reservation` primitive with
    `persistent=True`, so the SIGUSR1 walltime-resubmit trap keeps the
-   allocation alive past the cluster walltime cap indefinitely.
+   allocation alive past the cluster walltime cap indefinitely. It also
+   runs a **`_diag` log pruner** (keeps the newest `diag_keep`, default 20,
+   Worker/Runner logs per runner, hourly) so a long-lived session's per-job
+   logs never grow the shared-fileset inode footprint unbounded.
 
 2. **Health monitor** (`_monitor.py`) — a cron-driven script run from a
    workstation. Each tick it confirms the allocation is `RUNNING`, lists
-   live `Runner.Listener` processes via one `srun --overlap` step, and
+   live `Runner.Listener` processes via one `srun --overlap` step, checks
+   the runner install **fileset has inode headroom** (`df -i`), and
    **alarms the operator** (never fire-and-forget) when the allocation is
-   gone or a runner stays down. It never `scancel`s and never kills a
-   process — relaunch is the supervisor's job.
+   gone, a runner stays down, or the fileset is out of inodes (Listeners
+   can be alive while every job phantoms because a full-inode fileset stops
+   Workers creating files — the 2026-07-06 outage). It never `scancel`s and
+   never kills a process — relaunch is the supervisor's job.
 
 ## CLI
 
@@ -118,12 +124,19 @@ auto-resubmits before it expires.
 | walltime approaching            | Reservation trap   | SIGUSR1 → `sbatch "$0"` resubmits in place |
 | whole allocation gone           | operator (alarmed) | monitor exits 2 + alarm; rebook explicitly |
 | a keep-alive loop wedged        | operator (alarmed) | monitor exits 1 + alarm + `.needs-restart` |
+| supervisor never registered     | operator (alarmed) | monitor exits 3 + alarm; re-exec supervisor |
+| runner fileset out of inodes    | operator (alarmed) | monitor exits 4 + alarm; free inodes        |
 
 ## Monitor exit-code / alarm contract
 
-- `exit 0` — fleet healthy (one-line `OK` to stdout)
+- `exit 0` — fleet healthy (one-line `OK` to stdout, incl. current inode %)
 - `exit 1` — degraded: some runners down — alarm fired, names listed
 - `exit 2` — allocation gone / unreachable — alarm fired
+- `exit 3` — supervisor UNREGISTERED (no holder-jobid file; the
+  `ci-runners watch` / `overlap_jobid_file` deploy) — alarm fired
+- `exit 4` — runner install fileset at/above the inode threshold
+  (default 90 %); Listeners may be up but Workers can't create files, so
+  jobs phantom `in_progress` — alarm fired, free inodes
 - Alarm command: `$SCITEX_CI_ALARM_CMD` (stdin = `subject\nbody`), else
   the fleet `notify.sh` helper, else stderr (cron mails it).
 

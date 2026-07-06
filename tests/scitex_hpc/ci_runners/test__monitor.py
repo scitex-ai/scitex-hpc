@@ -170,6 +170,69 @@ def test_monitor_jobid_file_still_never_scancels():
     assert "scancel" not in script
 
 
+# ---------------------------------------------------------------------------
+# inode-headroom arm — catches the "listeners up but fileset full" outage
+# ---------------------------------------------------------------------------
+
+
+def test_monitor_exits_4_on_inode_wall():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
+    # Assert — a distinct exit code for the inode-critical case
+    assert "exit 4" in script
+
+
+def test_monitor_checks_inodes_with_df_i():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
+    # Assert — read-only df -i inode probe
+    assert "df -i" in script
+
+
+def test_monitor_inode_check_defaults_to_ci_base_fileset():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
+    # Assert — checks the fileset the runner install dirs live on
+    assert f"df -i '{CI_BASE}'" in script
+
+
+def test_monitor_inode_threshold_is_configurable():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(
+        fleet, host="spartan", lease_name="fleet", inode_threshold_pct=80
+    )
+    # Assert
+    assert '"$IUSE" -ge 80' in script
+
+
+def test_monitor_inode_path_override():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(
+        fleet, host="spartan", lease_name="fleet", inode_path="/data/scratch"
+    )
+    # Assert
+    assert "df -i '/data/scratch'" in script
+
+
+def test_monitor_inode_check_is_read_only():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
+    # Assert — the inode arm must never delete on the cluster (monitor is read-mostly)
+    assert "rm -rf" not in script
+
+
 def test_archive_is_non_destructive():
     # Arrange
     home = "~"

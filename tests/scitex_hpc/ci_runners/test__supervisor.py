@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-
 from scitex_hpc.ci_runners import (
-    DEFAULT_DIAG_KEEP,
     FleetSpec,
     RunnerSpec,
     build_supervisor_hold_body,
-    diag_pruner_fragment,
     runner_keepalive_fragment,
 )
-from scitex_hpc.ci_runners._supervisor import _TOOLCACHE_PROVISION
 
 CI_BASE = "/data/gpfs/projects/punim0264/ywatanabe/ci"
 
@@ -60,15 +53,6 @@ def test_fragment_moves_real_work_aside_before_symlink():
     frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
     # Assert — mv (atomic, busy-safe) so ln -sfn replaces a real _work dir
     assert 'mv "$d/_work"' in frag
-
-
-def test_fragment_path_includes_user_bin():
-    # Arrange
-    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
-    # Act
-    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
-    # Assert — ~/.bin holds gh; non-interactive shells skip .bashrc's PATH add
-    assert "$HOME/.bin:" in frag
 
 
 def test_fragment_loops_for_restart():
@@ -189,73 +173,6 @@ def test_body_provision_substitutes_toolcache_placeholder():
     assert "__TOOLCACHE__" not in body
 
 
-def test_body_provision_checks_interpreter_resolves_not_just_marker():
-    # Arrange
-    fleet = _fleet("a")
-    # Act
-    body = build_supervisor_hold_body(fleet)
-    # Assert — detection runs the interpreter (dangling-symlink safe), not
-    # merely an ``ls`` of the x64.complete marker
-    assert "x64/bin/python3" in body
-
-
-# ---------------------------------------------------------------------------
-# _provision_toolcache detection — behavioral (real bash over a synthetic cache)
-# ---------------------------------------------------------------------------
-
-
-def _seed_healthy(cache: str, full: str) -> None:
-    """Lay a resolvable interpreter + marker at $cache/Python/<full>/x64."""
-    binroot = os.path.join(cache, "Python", full, "x64", "bin")
-    os.makedirs(binroot)
-    os.symlink(sys.executable, os.path.join(binroot, "python3"))
-    open(os.path.join(cache, "Python", full, "x64.complete"), "w").close()
-
-
-def _run_provision(cache: str, work: str) -> str:
-    """Run the real provisioning fragment; return its stderr.
-
-    A no-op fake ``uv`` is seeded so the re-provision path never touches the
-    network — the assertions only look at which versions the detection flags
-    for provisioning (echoed to stderr before any uv/install work).
-    """
-    os.makedirs(os.path.join(work, "tooling"))
-    uv = os.path.join(work, "tooling", "uv")
-    with open(uv, "w") as fh:
-        fh.write("#!/bin/bash\nexit 0\n")
-    os.chmod(uv, 0o755)
-    frag = _TOOLCACHE_PROVISION.replace("__TOOLCACHE__", cache).replace(
-        "__WORK_ROOT__", work
-    )
-    proc = subprocess.run(["bash", "-c", frag], capture_output=True, text=True)
-    return proc.stderr
-
-
-def test_provision_is_noop_when_all_interpreters_resolve(tmp_path):
-    # Arrange
-    cache = str(tmp_path / "tc")
-    for full in ("3.11.15", "3.12.13", "3.13.14"):
-        _seed_healthy(cache, full)
-    # Act
-    stderr = _run_provision(cache, str(tmp_path / "work"))
-    # Assert — a healthy cache does not re-provision
-    assert "provisioning" not in stderr
-
-
-def test_provision_reprovisions_on_dangling_symlink_despite_marker(tmp_path):
-    # Arrange — 3.11 + 3.13 healthy; 3.12 has its marker but a DANGLING x64
-    cache = str(tmp_path / "tc")
-    for full in ("3.11.15", "3.13.14"):
-        _seed_healthy(cache, full)
-    os.makedirs(os.path.join(cache, "Python", "3.12.13"))
-    os.symlink("/nonexistent-toolcache-src", os.path.join(cache, "Python", "3.12.13", "x64"))
-    open(os.path.join(cache, "Python", "3.12.13", "x64.complete"), "w").close()
-    # Act
-    stderr = _run_provision(cache, str(tmp_path / "work"))
-    # Assert — the dead 3.12 link is detected and re-provisioned
-    assert "3.12" in stderr
-
-
 def test_body_overrides_tmpdir_to_local_disk():
     # Arrange
     fleet = _fleet("a")
@@ -272,16 +189,6 @@ def test_body_tmpdir_override_comes_after_bashrc_source():
     body = build_supervisor_hold_body(fleet)
     # Assert — the override must win over the profile's TMPDIR=$HOME/.cache/tmp
     assert body.index('source "$HOME/.bashrc"') < body.index("export TMPDIR=")
-
-
-def test_body_path_prepends_user_bin():
-    # Arrange
-    fleet = _fleet("a")
-    # Act
-    body = build_supervisor_hold_body(fleet)
-    # Assert — release-tail gh (in ~/.bin) must resolve in the non-interactive
-    # supervisor; ~/.bashrc only adds ~/.bin for interactive shells
-    assert 'export PATH="$HOME/.bin:$HOME/.local/bin:$HOME/.cargo/bin:' in body
 
 
 def test_body_scrubs_inherited_secret_env_vars():
@@ -309,83 +216,3 @@ def test_body_scrub_covers_token_pattern():
     body = build_supervisor_hold_body(fleet)
     # Assert — OAuth/bearer tokens must be stripped from the job env
     assert "*TOKEN*" in body
-
-
-# ---------------------------------------------------------------------------
-# _diag log pruner — bounds each runner's _diag inode footprint
-# ---------------------------------------------------------------------------
-
-
-def test_pruner_bounds_worker_logs_to_diag_keep():
-    # Arrange
-    fleet = _fleet("scitex-hpc")
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert — keep newest DEFAULT_DIAG_KEEP, delete the rest (tail -n +N+1)
-    assert f'ls -t "$d"/_diag/Worker_*.log 2>/dev/null | tail -n +{DEFAULT_DIAG_KEEP + 1}' in frag
-
-
-def test_pruner_bounds_runner_logs_too():
-    # Arrange
-    fleet = _fleet("scitex-hpc")
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert
-    assert '/_diag/Runner_*.log 2>/dev/null | tail -n +' in frag
-
-
-def test_pruner_loops_on_the_supervisor_sentinel():
-    # Arrange
-    fleet = _fleet("a")
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert — the pruner exits when the supervisor removes the sentinel
-    assert "while [ -f /tmp/scitex-ci-supervisor.alive ]; do" in frag
-
-
-def test_pruner_honours_diag_keep_override():
-    # Arrange
-    fleet = _fleet("a")
-    fleet.diag_keep = 5
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert
-    assert "tail -n +6" in frag
-
-
-def test_pruner_honours_prune_interval_override():
-    # Arrange
-    fleet = _fleet("a")
-    fleet.diag_prune_interval = 111
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert
-    assert "sleep 111" in frag
-
-
-def test_pruner_iterates_only_active_runners():
-    # Arrange — exclude one runner; it must not appear in the prune loop
-    fleet = _fleet("a", "b")
-    fleet.exclude = ("b",)
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert
-    assert "actions-runner-b" not in frag
-
-
-def test_pruner_deletes_only_via_rm_f_of_older_logs():
-    # Arrange
-    fleet = _fleet("a")
-    # Act
-    frag = diag_pruner_fragment(fleet)
-    # Assert — pure log hygiene: only ever xargs rm -f the tail (older) logs
-    assert "xargs -r rm -f" in frag
-
-
-def test_body_launches_the_diag_pruner():
-    # Arrange
-    fleet = _fleet("a", "b")
-    # Act
-    body = build_supervisor_hold_body(fleet)
-    # Assert — the supervisor body backgrounds the pruner loop
-    assert "_scitex_ci_diag_pruner &" in body

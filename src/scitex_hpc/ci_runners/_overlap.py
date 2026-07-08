@@ -36,13 +36,6 @@ DEFAULT_BODY_PATH = "$HOME/.scitex/ci/supervisor_body.sh"
 # Where the detached supervisor's combined stdout/stderr is captured.
 DEFAULT_LOG_PATH = "/tmp/scitex-ci-supervisor.log"
 
-# Runtime file recording the CURRENT holder job id the supervisor step runs
-# under. Written at exec-supervisor launch so the health watchdog
-# (``ci-runners watch``) resolves the live holder without a fragile
-# squeue-by-name lookup (which false-alarms on the overlap-step deploy).
-# ``runtime/`` per the registry layout = ephemeral live state.
-DEFAULT_HOLDER_JOBID_PATH = "$HOME/.scitex/hpc/runtime/ci-supervisor-holder.jobid"
-
 # Absolute srun path — the holder's job env may have scrubbed PATH, and
 # the supervisor body itself purges modules, so never rely on PATH here.
 SRUN_BIN = "/apps/slurm/latest/bin/srun"
@@ -105,15 +98,8 @@ def build_exec_supervisor_script(
     body_path: str = DEFAULT_BODY_PATH,
     log_path: str = DEFAULT_LOG_PATH,
     srun_bin: str = SRUN_BIN,
-    jobid_path: str = DEFAULT_HOLDER_JOBID_PATH,
 ) -> str:
     """Full remote script: write the body, then launch the overlap step.
-
-    Also records ``overlap_jobid`` to ``jobid_path`` so the health watchdog
-    (``ci-runners watch``) resolves the live holder from a file instead of a
-    squeue-by-name lookup. On a walltime-resubmit the holder id changes and
-    exec-supervisor is re-run against the new holder, which rewrites the
-    file — so the watchdog always reads the current holder.
 
     This is what runs over SSH on the host. It is deterministic and
     side-effect-free to *generate* (no SSH, no SLURM), so the dry-run path
@@ -126,16 +112,9 @@ def build_exec_supervisor_script(
         log_path=log_path,
         srun_bin=srun_bin,
     )
-    record_jobid = (
-        f'mkdir -p "$(dirname {jobid_path})" 2>/dev/null || true\n'
-        f'echo "{overlap_jobid}" > {jobid_path}'
-    )
     return (
         f"{write}\n"
         f'echo "[scitex-ci] wrote supervisor body to {body_path}" >&2\n'
-        f"{record_jobid}\n"
-        f'echo "[scitex-ci] recorded holder jobid {overlap_jobid} to '
-        f'{jobid_path}" >&2\n'
         f"{launch}\n"
         f'echo "[scitex-ci] launched overlap step on jobid {overlap_jobid}; '
         f'log: {log_path}" >&2'

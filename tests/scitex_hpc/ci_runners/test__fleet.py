@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from scitex_hpc.ci_runners import (
-    DEFAULT_DIAG_KEEP,
     DEFAULT_RESTART_BACKOFF_SECONDS,
     FleetSpec,
     RunnerSpec,
@@ -90,12 +89,3 @@ def test_fleet_default_backoff():
     backoff = fleet.restart_backoff
     # Assert
     assert backoff == DEFAULT_RESTART_BACKOFF_SECONDS
-
-
-def test_fleet_default_diag_keep():
-    # Arrange
-    fleet = FleetSpec(ci_base=CI_BASE)
-    # Act
-    keep = fleet.diag_keep
-    # Assert
-    assert keep == DEFAULT_DIAG_KEEP

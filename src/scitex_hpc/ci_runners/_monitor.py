@@ -18,9 +18,6 @@ The monitor's contract is explicit and cron-friendly:
   * exit 0  -> fleet healthy
   * exit 1  -> degraded (some runners down) — alarm fired
   * exit 2  -> allocation gone / unreachable — alarm fired
-  * exit 4  -> runner fileset out of inodes — alarm fired (listeners are
-    up but Workers cannot create files, so jobs silently phantom; the
-    2026-07-06 GPFS inode-wall outage the listener check was blind to)
   * a one-line human summary goes to stdout every tick; failures also go
     to stderr so ``cron`` mails them and any wrapper sees them.
 
@@ -55,102 +52,24 @@ alarm() {
 """
 
 
-def build_monitor_script(
-    fleet: FleetSpec,
-    *,
-    host: str,
-    lease_name: str,
-    overlap_jobid: str | None = None,
-    overlap_jobid_file: str | None = None,
-    inode_path: str | None = None,
-    inode_threshold_pct: int = 90,
-) -> str:
+def build_monitor_script(fleet: FleetSpec, *, host: str, lease_name: str) -> str:
     """Return a self-contained POSIX ``bash`` health-monitor script.
 
     ``host`` is the SSH alias for the cluster (e.g. ``spartan``);
     ``lease_name`` is the supervisor allocation's SLURM job name (matches
     the Reservation friendly name, e.g. ``spartan-ci-runner-fleet``).
 
-    ``overlap_jobid`` switches step 1 from a name lookup to a **job-id**
-    lookup (``squeue --job=<id>``). Use it when the supervisor runs as an
-    ``exec-supervisor`` step on an EXISTING holder allocation rather than a
-    dedicated named ``book-supervisor`` job — there is no job named
-    ``lease_name`` in that deploy, so the name lookup would find nothing and
-    false-alarm "allocation DOWN" every tick. Both paths key the per-runner
-    listener check off the resolved job id, so step 2 is identical.
-
-    ``overlap_jobid_file`` is the durable form used by ``ci-runners watch``:
-    instead of a build-time id, the script reads the current holder id from
-    a file on the cluster (written by exec-supervisor) at RUNTIME — so it
-    survives the id churn of a walltime-resubmit. A missing/empty file exits
-    3 ("supervisor UNREGISTERED"), distinct from exit 2 (allocation down),
-    rather than false-alarming a live-but-unnamed overlap step.
-
-    ``inode_path`` is the path whose fileset the monitor checks for inode
-    headroom (defaults to ``fleet.ci_base`` — the fileset the runner install
-    dirs live on). If that fileset is at/above ``inode_threshold_pct`` inodes
-    used, the monitor ALARMS and exits 4: the listeners can be perfectly
-    alive while every job phantoms, because a full-inode fileset stops the
-    Worker from creating its ``_diag``/``_work``/job-temp files (the
-    2026-07-06 outage). ``df -i`` is read-only.
-
     The generated script is idempotent and read-mostly: its only write to
     the cluster is, when a runner's listener is missing, to *touch* a
     per-runner ``.needs-restart`` marker the supervisor loop notices — it
-    never kills the supervisor or any live runner. Allocation rebooking /
-    supervisor re-exec stays a deliberate operator action.
+    never kills the supervisor or any live runner. Allocation rebooking
+    stays a deliberate operator action.
     """
-    resolve_preamble = ""
-    if overlap_jobid_file:
-        # Resolve the holder id at RUNTIME from the supervisor's runtime
-        # file (survives walltime-resubmit id churn). A missing/empty file
-        # means the supervisor never registered -> a DISTINCT exit 3, not a
-        # false "allocation DOWN".
-        squeue_selector = "--job=$HOLDER_JOBID"
-        target_ident = "holder job $HOLDER_JOBID"
-        recover_hint = (
-            "the supervisor runs as an --overlap step; re-exec with: "
-            "scitex-hpc ci-runners exec-supervisor --overlap-jobid "
-            "<holder> ... (operator action)"
-        )
-        resolve_preamble = (
-            "# --- 0. resolve holder job id from the supervisor runtime "
-            "file --\n"
-            'HOLDER_JOBID="$(ssh "$HOST" bash -lc '
-            f"'cat {overlap_jobid_file} 2>/dev/null'"
-            ' 2>/dev/null | tr -dc "0-9")"\n'
-            'if [ -z "$HOLDER_JOBID" ]; then\n'
-            '  alarm "scitex-ci: supervisor UNREGISTERED" \\\n'
-            f'    "no holder jobid at {overlap_jobid_file} on $HOST -- the '
-            "supervisor never started or its runtime file was cleared. "
-            "Launch: scitex-hpc ci-runners exec-supervisor --overlap-jobid "
-            '<holder> (operator action)."\n'
-            '  echo "$TS CRITICAL supervisor-unregistered"\n'
-            "  exit 3\n"
-            "fi\n"
-        )
-    elif overlap_jobid:
-        squeue_selector = f"--job={overlap_jobid}"
-        target_ident = f"holder job {overlap_jobid}"
-        recover_hint = (
-            "the supervisor runs as an --overlap step on this holder; "
-            "re-exec with: scitex-hpc ci-runners exec-supervisor "
-            f"--overlap-jobid {overlap_jobid} ... (operator action)"
-        )
-    else:
-        squeue_selector = f"--name={lease_name}"
-        target_ident = f"lease '{lease_name}'"
-        recover_hint = (
-            "Rebook with: scitex-hpc ci-runners book-supervisor ... "
-            "(operator action)."
-        )
     names = " ".join(r.name for r in fleet.active())
     dirs = "\n".join(
         f'  ["{r.name}"]="{r.dir}"' for r in fleet.active()
     )
     srun = "/apps/slurm/latest/bin/srun"
-    # Default the inode check to the fileset the runner install dirs live on.
-    inode_target = inode_path if inode_path is not None else fleet.ci_base
     return f"""#!/usr/bin/env bash
 # scitex-ci runner-fleet health monitor (generated by scitex_hpc.ci_runners).
 # Run from a workstation crontab, e.g. every 5 min:
@@ -168,18 +87,17 @@ declare -A RUNNER_DIRS=(
 RUNNER_NAMES="{names}"
 TS="$(date -u +%FT%TZ)"
 
-{resolve_preamble}
 # --- 1. resolve the supervisor allocation (job id + node) ------------
 # A single login-shell SSH does the squeue lookup; everything else keys
 # off the resolved JOBID so we never re-query the scheduler per runner.
 read -r JOBID STATE NODE < <(
   ssh "$HOST" bash -lc \\
-    "squeue --user=\\$USER {squeue_selector} --noheader --format='%i %T %N' 2>/dev/null" \\
+    "squeue --user=\\$USER --name={lease_name} --noheader --format='%i %T %N' 2>/dev/null" \\
     2>/dev/null | awk 'NR==1{{print $1, $2, $3}}'
 )
 if [ "${{STATE:-}}" != "RUNNING" ] || [ -z "${{JOBID:-}}" ] || [ -z "${{NODE:-}}" ]; then
   alarm "scitex-ci: supervisor allocation DOWN" \\
-    "{target_ident} on $HOST is not RUNNING (state='${{STATE:-none}}'). {recover_hint}"
+    "lease '$LEASE_NAME' on $HOST is not RUNNING (state='${{STATE:-none}}'). Rebook with: scitex-hpc ci-runners book-supervisor ... (operator action)."
   echo "$TS CRITICAL allocation-down state=${{STATE:-none}}"
   exit 2
 fi
@@ -215,24 +133,6 @@ if [ "${{#down[@]}}" -gt 0 ]; then
   exit 1
 fi
 
-# --- 3. runner fileset inode headroom ---------------------------------
-# A runner whose Listener is alive still cannot run jobs if its install
-# fileset is out of INODES: the Worker can't create _diag/_work/job-temp
-# files, so every job silently phantoms in_progress on GitHub (the
-# 2026-07-06 punim0264 inode-wall outage). Step 2 is blind to this -- a
-# full fileset with live listeners would report "healthy" -- so check it
-# explicitly. df -i is read-only; IUse% is the second-to-last column.
-IUSE="$(
-  ssh "$HOST" bash -lc "df -i '{inode_target}' 2>/dev/null | tail -1" \\
-    2>/dev/null | awk '{{u=$(NF-1); gsub(/%/,"",u); print u}}'
-)"
-if [ -n "$IUSE" ] && [ "$IUSE" -ge {inode_threshold_pct} ] 2>/dev/null; then
-  alarm "scitex-ci: runner fileset inode-critical (${{IUSE}}%)" \\
-    "{inode_target} on $HOST is at ${{IUSE}}% inodes (>= {inode_threshold_pct}%). Listeners are up but Workers cannot create files -> jobs will phantom in_progress. Free inodes (stale _work/_diag, per-run session dirs) before CI wedges."
-  echo "$TS CRITICAL inode-wall iuse=${{IUSE}}%"
-  exit 4
-fi
-
-echo "$TS OK node=$NODE runners=$(echo "$RUNNER_NAMES" | wc -w) inodes=${{IUSE:-?}}%"
+echo "$TS OK node=$NODE runners=$(echo "$RUNNER_NAMES" | wc -w)"
 exit 0
 """

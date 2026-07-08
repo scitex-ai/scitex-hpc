@@ -41,8 +41,6 @@ SciTeX config cascade, exactly like the rest of ``scitex-hpc``.
 from __future__ import annotations
 
 from ._fleet import (
-    DEFAULT_DIAG_KEEP,
-    DEFAULT_DIAG_PRUNE_INTERVAL_SECONDS,
     DEFAULT_RESTART_BACKOFF_SECONDS,
     RUNNER_DIR_PREFIX,
     FleetSpec,
@@ -55,37 +53,18 @@ from ._overlap import (
     build_overlap_srun_command,
     build_write_body_command,
 )
-from ._register import (
-    DEFAULT_RUNNER_LABELS,
-    REQUIRED_LABEL,
-    build_register_command,
-    missing_required_labels,
-    normalize_labels,
-)
-from ._supervisor import (
-    build_supervisor_hold_body,
-    diag_pruner_fragment,
-    runner_keepalive_fragment,
-)
+from ._supervisor import build_supervisor_hold_body, runner_keepalive_fragment
 
 __all__ = [
-    "DEFAULT_DIAG_KEEP",
-    "DEFAULT_DIAG_PRUNE_INTERVAL_SECONDS",
     "DEFAULT_RESTART_BACKOFF_SECONDS",
-    "DEFAULT_RUNNER_LABELS",
-    "REQUIRED_LABEL",
     "RUNNER_DIR_PREFIX",
     "FleetSpec",
     "RunnerSpec",
     "build_exec_supervisor_script",
     "build_monitor_script",
     "build_overlap_srun_command",
-    "build_register_command",
     "build_supervisor_hold_body",
     "build_write_body_command",
-    "diag_pruner_fragment",
-    "missing_required_labels",
-    "normalize_labels",
     "parse_runner_dirs",
     "runner_keepalive_fragment",
 ]

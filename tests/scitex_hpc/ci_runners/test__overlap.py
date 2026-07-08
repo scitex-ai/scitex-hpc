@@ -170,21 +170,3 @@ def test_exec_script_reuses_the_exact_supervisor_body():
     script = build_exec_supervisor_script(body, "1")
     # Assert — no duplicated keep-alive logic: the verbatim body is present
     assert body.rstrip() in script
-
-
-def test_exec_script_records_holder_jobid_for_the_watchdog():
-    # Arrange
-    jobid = "26437532"
-    # Act
-    script = build_exec_supervisor_script("echo body", jobid)
-    # Assert — the id is written so `ci-runners watch` resolves the live holder
-    assert f'echo "{jobid}" >' in script
-
-
-def test_exec_script_uses_the_default_holder_jobid_path():
-    # Arrange
-    from scitex_hpc.ci_runners._overlap import DEFAULT_HOLDER_JOBID_PATH
-    # Act
-    script = build_exec_supervisor_script("echo body", "26437532")
-    # Assert
-    assert DEFAULT_HOLDER_JOBID_PATH in script

@@ -7,7 +7,6 @@ Dispatch verbs exported from ``scitex_hpc``.
 - ``sbatch`` submits an async batch job and returns the job ID.
 - ``sync`` rsyncs a project tree to the HPC host.
 - ``poll_job`` checks sacct status for a job ID.
-- ``job_stats`` returns a per-job (and per-array-task) resource report.
 - ``fetch_result`` scps the full output of a sbatch job.
 
 HPC-awareness helpers (Phase 1 of the HPC-aware Apptainer story).
@@ -43,7 +42,6 @@ except ImportError:  # pragma: no cover — only on ancient Pythons
     __version__ = "0.0.0+local"
 from ._config import HPC_DEFAULTS, JobConfig
 from ._dispatch import sbatch, srun
-from ._job_stats import job_stats
 from ._modules import detect_module_system, load_apptainer, module_load
 from ._reservation import Reservation
 from ._results import fetch_result, poll_job
@@ -56,7 +54,6 @@ __all__ = [
     "Reservation",
     "detect_module_system",
     "fetch_result",
-    "job_stats",
     "load_apptainer",
     "module_load",
     "poll_job",

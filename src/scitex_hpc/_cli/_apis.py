@@ -25,7 +25,6 @@ def list_python_apis(verbose, as_json):
         ("sbatch", "Async sbatch submission; returns job_id."),
         ("sync", "rsync local sources to the cluster."),
         ("poll_job", "Check sacct status for a job_id."),
-        ("job_stats", "Per-job (and per-array-task) sacct resource report."),
         ("fetch_result", "scp the .out file of a finished sbatch job."),
     ]
     if as_json:

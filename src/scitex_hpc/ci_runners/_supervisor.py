@@ -75,6 +75,18 @@ mkdir -p "$TMPDIR"
 printf '%s\n' '#!/usr/bin/env bash' '[ -n "${RUNNER_TEMP:-}" ] && rm -rf "$RUNNER_TEMP" 2>/dev/null' '[ -n "${RUNNER_WORK_DIRECTORY:-}" ] && rm -rf "$RUNNER_WORK_DIRECTORY/_temp" 2>/dev/null' 'exit 0' > "__HOOK_PATH__"
 chmod +x "__HOOK_PATH__"
 export ACTIONS_RUNNER_HOOK_JOB_COMPLETED="__HOOK_PATH__"
+# actions/checkout unconditionally runs `git config --global --add
+# safe.directory <workspace>` on EVERY job, with no dedup check (upstream
+# behavior since the CVE-2022-24765 fix). Across 70+ runners and thousands
+# of job runs this bloats the operator's real ~/.gitconfig -- which is a
+# symlink into the dotfiles SSoT -- to 16k+ duplicate lines (found
+# 2026-07-09). GIT_CONFIG_GLOBAL redirects ALL --global git config
+# reads+writes for this runner's shell (and everything the runner spawns) to
+# a node-local scratch copy, seeded ONCE from the real file so identity
+# (user.name/user.email) and credential settings still resolve -- CI jobs
+# just stop being able to write back into the tracked source.
+export GIT_CONFIG_GLOBAL="__WORK_ROOT__/git-config-global-ci.ini"
+[ -f "$GIT_CONFIG_GLOBAL" ] || cp -f "$HOME/.gitconfig" "$GIT_CONFIG_GLOBAL" 2>/dev/null || : > "$GIT_CONFIG_GLOBAL"
 """
 
 

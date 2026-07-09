@@ -311,6 +311,39 @@ def test_body_scrub_covers_token_pattern():
     assert "*TOKEN*" in body
 
 
+def test_body_scopes_git_config_global_off_home(tmp_path):
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert — actions/checkout's unchecked safe.directory adds must land
+    # in a scratch file, never the operator's real ~/.gitconfig (dotfiles SSoT)
+    assert f'export GIT_CONFIG_GLOBAL="{fleet.work_root}/git-config-global-ci.ini"' in body
+
+
+def test_git_config_global_seeded_from_real_gitconfig_once(tmp_path):
+    # Arrange — a real ~/.gitconfig with a marker line, no scratch copy yet
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[user]\n\tname = marker\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    fleet = _fleet("a")
+    fleet.work_root = str(work)
+    body = build_supervisor_hold_body(fleet)
+    # Act — run just the seeding line for real, with HOME pointed at the fixture
+    seed_line = next(
+        ln for ln in body.splitlines() if ln.startswith("[ -f \"$GIT_CONFIG_GLOBAL\" ]")
+    )
+    subprocess.run(
+        ["bash", "-c", f'export GIT_CONFIG_GLOBAL="{work}/git-config-global-ci.ini"\n{seed_line}'],
+        env={**os.environ, "HOME": str(home)},
+        check=True,
+    )
+    # Assert — the scratch copy carries the real identity forward
+    assert "marker" in (work / "git-config-global-ci.ini").read_text()
+
+
 # ---------------------------------------------------------------------------
 # _diag log pruner — bounds each runner's _diag inode footprint
 # ---------------------------------------------------------------------------

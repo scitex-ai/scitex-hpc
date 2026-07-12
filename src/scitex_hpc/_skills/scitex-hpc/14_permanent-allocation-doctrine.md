@@ -1,14 +1,16 @@
 ---
 description: |
   [TOPIC] Permanent Allocation Doctrine
-  [DETAILS] When to hold a long-walltime SLURM allocation vs. dispatch
-  one-shot jobs; how to make a held allocation durable (self-resubmit that
-  verifies success and fails loud, not hopes silently); how to get freshness
-  without re-queuing (container + overlay per unit of work, not a new
-  allocation); the "zero failing steps" lost-runner detection rule. Grounded
-  in the 2026-07-13 CI-supervisor incident (resubmit trap fired, `sbatch`
-  wasn't on PATH after env hardening, ~74 runners died silently for 15-20min
-  with no alarm) and verified Spartan partition limits.
+  [DETAILS] When to hold a SLURM allocation vs. dispatch one-shot jobs;
+  permanence comes from a VERIFIED, fail-loud self-resubmit, not from the
+  walltime number requested (walltime is a tunable, weighed against queue
+  contention); how to empirically verify the real achievable walltime
+  (sacctmgr + sbatch --test-only, since sinfo's MaxTime is a ceiling, not
+  a guarantee); how to get freshness without re-queuing (container +
+  overlay per unit of work); the "zero failing steps" lost-runner
+  detection rule. Grounded in the 2026-07-13 CI-supervisor incident
+  (resubmit trap fired, `sbatch` wasn't on PATH after env hardening, ~74
+  runners died silently for 15-20min with no alarm).
 tags: [scitex-hpc-permanent-allocation, scitex-hpc, scitex-package]
 ---
 
@@ -38,24 +40,68 @@ nodes for work that queues fine on its own. The rule cuts both ways: a
 permanent allocation idling most of the time is exactly the kind of
 shared-resource pressure Spartan etiquette exists to prevent.
 
-## How: verified real numbers, not folklore
+## How: permanence comes from the verified resubmit, not the walltime
 
-`sinfo -o '%P %l'` (live-verified 2026-07-13):
+**The walltime you request is a tunable, not the source of durability.** A
+14-day allocation with a proven, fail-loud resubmit is *more* permanent
+than a 90-day one whose renewal silently fails — walltime only ever buys
+time until the next renewal; the renewal itself is what actually keeps
+the allocation alive indefinitely. The 2026-07-13 incident below is the
+proof: the resubmit trap fired exactly on schedule, but the resubmit
+*call* silently failed, and every dependent runner went dark regardless
+of how long the walltime had been. Get the resubmit right first. Then
+pick a walltime.
 
-| Partition | Max walltime |
-|---|---|
-| `sapphire` (default) | 30-00:00:00 |
-| `cascade` | 30-00:00:00 |
-| `gpu-h100` | 7-00:00:00 |
-| `gpu-a100` | 7-00:00:00 |
-| `long` | 90-00:00:00 |
-| `bigmem` | 21-00:00:00 |
-| `interactive` | 2-00:00:00 |
+**Picking the walltime — two competing pulls, resolve empirically:**
+- Longer walltime = fewer renewal cycles = fewer chances to hit the
+  resubmit's one failure mode.
+- Under partition contention, a *longer* request can sit queued while a
+  *shorter* one schedules immediately — and a permanent node that hasn't
+  started yet is worth nothing. Watch queue depth (`squeue -p <partition>`)
+  and adjust downward when the cluster is busy; there is no fixed "right"
+  number, only what's actually schedulable right now.
 
-In production: the CI supervisor runs 14-day walltime on `sapphire`
-(well inside its 30-day cap); qwen runs 7-day walltime on `gpu-h100`
-(exactly at that partition's cap — 7 days is the practical ceiling for
-GPU work, not a choice).
+**`sinfo`'s `MaxTime` is a partition ceiling, not a number you're
+guaranteed to be granted** — the real limit is whatever the tightest of
+partition MaxTime, QOS MaxWall, and your account/user association's
+MaxWall works out to, and `sinfo` only shows the first of those three.
+Trusting `sinfo` alone is exactly the kind of true-but-wrong-question
+error that cost the fleet real time today elsewhere (a correct number,
+pointed at the wrong denominator). Verify empirically, not from a single
+read:
+
+```bash
+sacctmgr show qos format=Name,MaxWall -P                       # QOS ceiling
+sacctmgr show assoc user=$USER format=Account,QOS,MaxWall -P   # your binding limit
+sacct -u $USER -X -o JobID,Partition,QOS,Timelimit,State -S <date> -P  # what's ACTUALLY been granted, historically
+sbatch --test-only <script-with-the-walltime-you-want>          # decisive: accepted (prints a start estimate) or rejected outright
+```
+
+Live-verified 2026-07-13 for `punim0264`/`publiccpu` on `sapphire`: both
+`sacctmgr` queries returned blank `MaxWall` (no QOS/association override
+below the partition ceiling); `sacct` history showed nothing beyond the
+CI supervisor's own 14-day jobs ever actually granted; the decisive test
+— `sbatch --test-only` — **accepted** a 30-day request (real start-time
+estimate, no error) and **rejected** a 35-day request outright
+(`allocation failure: Requested time limit is invalid`). So for this
+account, `sinfo`'s reported 30-day `sapphire` ceiling happens to be the
+real, achievable number — but that agreement is a fact about *this*
+account today, not a property of `sinfo` you can assume holds for a
+different account, QOS, or cluster policy change. Re-run the empirical
+check, don't just read the table below from memory:
+
+| Partition | `sinfo` MaxTime (ceiling, not a promise) | Empirically confirmed achievable (this account, 2026-07-13) |
+|---|---|---|
+| `sapphire` (default) | 30-00:00:00 | 30-00:00:00 (`--test-only` accepted; 35d rejected) |
+| `gpu-h100` | 7-00:00:00 | 7-00:00:00 (matches largest ever actually run: job 26987967) |
+| `cascade` | 30-00:00:00 | not independently tested — same account, likely matches `sapphire`'s result, but don't assume |
+| `long` | 90-00:00:00 | not tested |
+
+In production: the CI supervisor runs 14-day walltime on `sapphire` —
+comfortably inside the confirmed 30-day ceiling, chosen for fewer
+renewal cycles while leaving headroom against partition contention at
+submission time; qwen runs 7-day walltime on `gpu-h100`, at that
+partition's exact confirmed ceiling (GPU work has less room to spare).
 
 ### The resubmit pattern — and its one real failure mode
 

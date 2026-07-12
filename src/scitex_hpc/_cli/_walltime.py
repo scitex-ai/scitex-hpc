@@ -36,7 +36,7 @@ def walltime() -> None:
     """Empirically-verified SLURM walltime limits (not sinfo alone)."""
 
 
-@walltime.command("max")
+@walltime.command("show")
 @click.argument("partition")
 @click.option(
     "--host",
@@ -58,7 +58,7 @@ def walltime() -> None:
     ),
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
-def walltime_max_cmd(partition, host, account, qos, verify, as_json):
+def walltime_show_cmd(partition, host, account, qos, verify, as_json):
     """Report the empirically achievable walltime ceiling for PARTITION.
 
     \b
@@ -70,8 +70,8 @@ def walltime_max_cmd(partition, host, account, qos, verify, as_json):
 
     \b
     Example:
-      $ scitex-hpc walltime max sapphire --verify
-      $ scitex-hpc walltime max gpu-h100 --json
+      $ scitex-hpc walltime show sapphire --verify
+      $ scitex-hpc walltime show gpu-h100 --json
     """
     config = JobConfig(project="", host=host, account=account, qos=qos)
     result = walltime_max(config, partition, verify=verify)

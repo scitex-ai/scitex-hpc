@@ -46,6 +46,7 @@ compute — every command is wrapped in `srun`/`sbatch` via a login-shell SSH.
 - [11_reservations-api.md](11_reservations-api.md) — full `Reservation` API + CLI
 - [12_reservation-features.md](12_reservation-features.md) — walltime auto-resubmit, tmux bootstrap, adopt-existing-jobid
 - [13_compatibility-policies.md](13_compatibility-policies.md) — no-daemon policy, login-shell wrapping, state files, empirical guarantees, source layout
+- [14_permanent-allocation-doctrine.md](14_permanent-allocation-doctrine.md) — when to hold a permanent allocation vs. dispatch one-shot; durable self-resubmit (verify + fail loud); `srun --overlap` concurrency; freshness via container+overlay, not re-queuing; the zero-failing-steps lost-runner signature
 
 ### Meta (20+)
 - [20_env-vars.md](20_env-vars.md) — Environment variables (`SCITEX_HPC_*`)

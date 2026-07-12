@@ -17,6 +17,7 @@ htmlcov/
 !.scitex/dev/
 .scitex/dev/*
 !.scitex/dev/config.yaml
+!.scitex/dev/cli-audit-dict.yaml
 .claude/
 .playwright-cli/
 logs/

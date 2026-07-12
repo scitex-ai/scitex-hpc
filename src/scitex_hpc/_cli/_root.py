@@ -27,6 +27,7 @@ COMMAND_CATEGORIES = [
     ("CI runners", ["ci-runners"]),
     ("Login-node guard", ["sentinel"]),
     ("Tunnel supervisor", ["tunnel-supervisor"]),
+    ("Decision info", ["walltime"]),
     ("Introspection", ["list-python-apis", "mcp", "skills"]),
     ("Shell", ["install-shell-completion", "print-shell-completion"]),
 ]
@@ -140,12 +141,14 @@ from ._reservations import lease as _lease_grp  # noqa: E402
 from ._reservations import reservations as _reservations_alias  # noqa: E402
 from ._skills import skills_group as _skills_group  # noqa: E402
 from ._tunnel_supervisor import tunnel_supervisor as _tunnel_supervisor_grp  # noqa: E402
+from ._walltime import walltime as _walltime_grp  # noqa: E402
 
 cli.add_command(_lease_grp)
 cli.add_command(_ci_runners_grp)
 cli.add_command(_login_guard_grp)
 cli.add_command(_tunnel_supervisor_grp)
 cli.add_command(_quota_grp)
+cli.add_command(_walltime_grp)
 # Deprecated alias — same subcommands, emits a stderr notice (hidden
 # from --help so `lease` is the single documented name).
 cli.add_command(_reservations_alias)

@@ -117,12 +117,12 @@ def _probe_test_only(
     if qos:
         script_lines.append(f"#SBATCH --qos={qos}")
     script_lines.append("echo probe")
-    script = "\\n".join(script_lines)
-    remote_cmd = (
-        f"tmp=$(mktemp /tmp/scitex-hpc-walltime-probe.XXXXXX.sbatch) && "
-        f"printf '{script}\\n' > \"$tmp\" && "
-        f"sbatch --test-only \"$tmp\"; rc=$?; rm -f \"$tmp\"; exit $rc"
-    )
+    script_body = "\n".join(script_lines) + "\n"
+
+    # Same pattern as ``sbatch()`` in _dispatch.py: pipe the script body
+    # through process substitution rather than writing/cleaning up a temp
+    # file remotely — one round trip, no leftover state on failure.
+    remote_cmd = f"sbatch --test-only <(printf %s {_quote(script_body)})"
     host = config.resolve("host")
     run = runner if runner is not None else exec_remote
     result = run(host, _wrap_in_login_shell(remote_cmd))

@@ -47,6 +47,7 @@ compute — every command is wrapped in `srun`/`sbatch` via a login-shell SSH.
 - [12_reservation-features.md](12_reservation-features.md) — walltime auto-resubmit, tmux bootstrap, adopt-existing-jobid
 - [13_compatibility-policies.md](13_compatibility-policies.md) — no-daemon policy, login-shell wrapping, state files, empirical guarantees, source layout
 - [14_permanent-allocation-doctrine.md](14_permanent-allocation-doctrine.md) — when to hold a permanent allocation vs. dispatch one-shot; durable self-resubmit (verify + fail loud); `srun --overlap` concurrency; freshness via container+overlay, not re-queuing; the zero-failing-steps lost-runner signature
+- [15_spartan-identity-access-traps.md](15_spartan-identity-access-traps.md) — why a multiplexed ssh session reads the PAST and makes a group revocation look like a "flap"; probing authoritatively (`ControlPath=none`, `getent group` over cached `id`); why losing a project group breaks shell init when `$HOME` dotdirs symlink into it; SLURM Account ≠ POSIX group
 
 ### Meta (20+)
 - [20_env-vars.md](20_env-vars.md) — Environment variables (`SCITEX_HPC_*`)

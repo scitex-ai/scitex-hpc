@@ -9,6 +9,10 @@ Dispatch verbs exported from ``scitex_hpc``.
 - ``poll_job`` checks sacct status for a job ID.
 - ``job_stats`` returns a per-job (and per-array-task) resource report.
 - ``fetch_result`` scps the full output of a sbatch job.
+- ``job_liveness`` decides ALIVE / DEAD / UNKNOWN for a SLURM job, with
+  evidence — the authoritative dead-signal instrument. DEAD requires
+  positive evidence from two tools; any query failure is UNKNOWN, never
+  DEAD, because a false DEAD would let a consumer tombstone a live agent.
 
 HPC-awareness helpers (Phase 1 of the HPC-aware Apptainer story).
 Pairs with the inside-SIF apptainer bundle in
@@ -44,6 +48,7 @@ except ImportError:  # pragma: no cover — only on ancient Pythons
 from ._config import HPC_DEFAULTS, JobConfig
 from ._dispatch import sbatch, srun
 from ._job_stats import job_stats
+from ._liveness import LivenessResult, job_liveness
 from ._modules import detect_module_system, load_apptainer, module_load
 from ._reservation import Reservation
 from ._results import fetch_result, poll_job
@@ -53,9 +58,11 @@ __all__ = [
     "__version__",
     "HPC_DEFAULTS",
     "JobConfig",
+    "LivenessResult",
     "Reservation",
     "detect_module_system",
     "fetch_result",
+    "job_liveness",
     "job_stats",
     "load_apptainer",
     "module_load",

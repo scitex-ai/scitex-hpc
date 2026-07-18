@@ -403,63 +403,38 @@ def _verdict_from_sacct_absence(
     evidence: dict[str, Any],
     ids: Mapping[str, Any],
 ) -> LivenessResult:
-    """No sacct row for the target — is that death, or a blind spot?
+    """No sacct row for the target — ALWAYS UNKNOWN, never DEAD.
 
-    Three readings: the job finished and simply has no row we matched; the
-    job-id predates the accounting retention window; or sacct is not
-    recording at all. A witness query settles it — if sacct returns *other*
-    jobs for this user in the same window, the window is provably populated
-    and the absence is real evidence. Otherwise we cannot tell, so UNKNOWN.
+    Three readings are indistinguishable from here: the job finished and has
+    no row we matched; the job-id predates the accounting retention window;
+    or sacct is not recording at all. Nothing observable separates them.
+
+    *** DELIBERATE — DO NOT RE-ADD A WITNESS QUERY. ***
+    An earlier revision inferred DEAD when a witness query
+    (``sacct --user=$USER`` over the same window) returned OTHER jobs, on the
+    reasoning that a provably-populated window makes this absence real. That
+    was removed on purpose (ruling 2026-07-18), for three reasons:
+
+      1. DEAD AUTHORISES DESTRUCTION; UNKNOWN DOES NOT. A DEAD verdict lets
+         the consumer tombstone a live agent's row. The irreversible branch
+         must not rest on an inference.
+      2. THE WITNESS IS AN INFERENCE, NOT AN OBSERVATION. "Other jobs exist,
+         therefore the window records, therefore THIS absence is real" is a
+         chain with two joints, and it still cannot separate "never existed"
+         from "cannot see that far back".
+      3. IT WAS EXPENSIVE. Measured on Spartan: 163,626 rows (55,576 even
+         with --allocations) parsed to answer a yes/no, once per resolution,
+         on a SHARED LOGIN NODE.
+
+    DEAD remains reachable — but only from a POSITIVE observation: sacct
+    rc=0 reporting an actual terminal state. Absence is not evidence.
     """
-    ids = dict(ids)
-    witness = run_probe(
-        run,
-        host,
-        f"sacct --user=$USER --starttime={_quote(sacct_window)} {_SACCT_FORMAT}",
-    )
-    evidence["sacct_witness"] = witness.summary()
-
-    failure = witness.failure_reason()
-    if failure is not None:
-        return _unknown(
-            f"sacct returned no row for the target and the witness query could "
-            f"not be trusted ({failure}); cannot distinguish a finished job "
-            "from one outside the retention window",
-            host=host,
-            evidence=evidence,
-            **ids,
-        )
-
-    witness_rows, witness_bad = parse_pipe_rows(witness.stdout)
-    if witness_bad:
-        return _unknown(
-            f"sacct witness output had {len(witness_bad)} unparseable data "
-            "line(s); cannot confirm the retention window is populated",
-            host=host,
-            evidence=evidence,
-            **ids,
-        )
-    witness_rows = [r for r in witness_rows if "." not in r.job_id]
-
-    if not witness_rows:
-        return _unknown(
-            f"sacct rc=0 but returned no rows at all for --starttime="
-            f"{sacct_window}: the job-id may be outside the accounting "
-            "retention window, or sacct may not be recording. Absence here is "
-            "not evidence.",
-            host=host,
-            evidence=evidence,
-            **ids,
-        )
-
-    return LivenessResult(
-        verdict=DEAD,
-        reason=(
-            "absence confirmed by both tools: squeue rc=0 without the job, "
-            "sacct rc=0 without the job, and the sacct witness query returned "
-            f"{len(witness_rows)} row(s) proving the window is populated"
-        ),
+    del run, sacct_window  # no query is issued: absence can never be evidence
+    return _unknown(
+        "absent from sacct — cannot distinguish never-existed from "
+        "out-of-window (or sacct not recording); absence is not evidence, so "
+        "this is UNKNOWN and never DEAD",
         host=host,
         evidence=evidence,
-        **ids,
+        **dict(ids),
     )

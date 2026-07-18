@@ -229,31 +229,53 @@ def test_dead_normalizes_sacct_cancelled_by_uid_suffix():
     assert result.verdict == DEAD
 
 
-def test_dead_when_absence_is_confirmed_by_both_tools():
-    """Absent from squeue AND sacct, with the window provably populated."""
+def test_absence_from_both_tools_is_unknown_never_dead():
+    """REGRESSION GUARD — absence is not evidence, even from both tools.
+
+    An earlier revision returned DEAD here by inferring from a "witness"
+    query that the accounting window was populated. That was removed on
+    purpose (ruling 2026-07-18): DEAD authorises the consumer to tombstone a
+    live agent's row, so the irreversible branch must never rest on an
+    inference. If this test ever fails, someone has re-added the witness —
+    read _verdict_from_sacct_absence's docstring before "fixing" it.
+    """
     # Arrange
     runner = FakeRunner(
         squeue=_res(stdout=BANNER),
         sacct=_res(stdout=BANNER),  # no row for our target
+        # Even with other jobs visible in the window, absence stays UNKNOWN.
         witness=_res(stdout=BANNER + _row(job_id="999", state="COMPLETED") + "\n"),
     )
     # Act
     result = job_liveness(HOST, job_id=JOB, runner=runner)
     # Assert
-    assert result.verdict == DEAD
+    assert result.verdict == UNKNOWN
 
 
-def test_absence_dead_reason_cites_the_witness_query():
+def test_absence_reason_says_absence_is_not_evidence():
+    """The reason must explain WHY, so nobody reads it as an oversight."""
     # Arrange
     runner = FakeRunner(
         squeue=_res(stdout=BANNER),
         sacct=_res(stdout=BANNER),
-        witness=_res(stdout=_row(job_id="999", state="COMPLETED") + "\n"),
     )
     # Act
     result = job_liveness(HOST, job_id=JOB, runner=runner)
     # Assert
-    assert "witness" in result.reason
+    assert "absence is not evidence" in result.reason
+
+
+def test_absence_reason_names_the_indistinguishable_readings():
+    """It must name WHAT it cannot tell apart, not just that it failed."""
+    # Arrange
+    runner = FakeRunner(
+        squeue=_res(stdout=BANNER),
+        sacct=_res(stdout=BANNER),
+    )
+    # Act
+    result = job_liveness(HOST, job_id=JOB, runner=runner)
+    # Assert
+    assert "never-existed" in result.reason
 
 
 def test_dead_verdict_ignores_sacct_job_step_rows():
@@ -418,25 +440,15 @@ def _unknown_cases() -> dict[str, tuple[FakeRunner, dict, str]]:
             both,
             "recycled",
         ),
-        "job_id_outside_sacct_retention_window": (
+        # Absent from sacct: indistinguishable from out-of-window or from
+        # sacct not recording. Never DEAD — see the regression guard above.
+        "job_id_absent_from_sacct": (
             FakeRunner(
                 squeue=_res(stdout=BANNER),
                 sacct=_res(stdout=""),
-                witness=_res(stdout=""),
             ),
             by_id,
-            "retention window",
-        ),
-        "sacct_witness_query_fails": (
-            FakeRunner(
-                squeue=_res(stdout=BANNER),
-                sacct=_res(stdout=""),
-                witness=_res(
-                    returncode=1, stderr="sacct: error: Unable to contact slurmdbd"
-                ),
-            ),
-            by_id,
-            "witness query could not be trusted",
+            "out-of-window",
         ),
         "squeue_absent_but_sacct_says_running": (
             FakeRunner(

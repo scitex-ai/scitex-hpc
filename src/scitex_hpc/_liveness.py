@@ -89,7 +89,21 @@ __all__ = [
     "job_liveness",
 ]
 
-_SACCT_FORMAT = "--noheader --parsable2 --format=JobID,State,NodeList,JobName"
+#: ``--allocations`` (-X) restricts sacct to allocation rows, dropping the
+#: per-step ``<id>.batch`` / ``.extern`` / ``.0`` children. Two reasons, both
+#: found by smoke-testing against real SLURM on Spartan (2026-07-18):
+#:   1. LOAD. Without it the witness query returned 163,608 rows for a single
+#:      user over 7 days — an entire accounting history enumerated and parsed
+#:      just to answer "is sacct recording?", repeatedly, on a SHARED LOGIN
+#:      NODE. Step rows are the bulk of that.
+#:   2. CORRECTNESS. Step states disagree with the allocation: a live lease
+#:      showed ``27305397|RUNNING`` alongside ``27305397.0|COMPLETED``. Any
+#:      consumer that saw the step row first could read a LIVE job as
+#:      finished. Filtering at the source is stronger than filtering on "."
+#:      afterwards (that filter stays, as defence in depth).
+_SACCT_FORMAT = (
+    "--allocations --noheader --parsable2 --format=JobID,State,NodeList,JobName"
+)
 
 
 @dataclass

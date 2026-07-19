@@ -177,6 +177,15 @@ job        submitted             started               queue wait
 27544359   2026-07-19T02:27:08   2026-07-19T02:27:28   20s
 ```
 
+**Those timestamps are cluster-local (Spartan is UTC+10), as everything
+`squeue`/`sacct` prints is.** The queue waits are differences and so are
+timezone-independent, but do not plan a maintenance window off a raw SLURM
+timestamp without converting it — reading one as UTC on this cluster
+overstates your remaining runway by ten hours, in the direction that has
+you arrive after the event you meant to precede. `squeue --format=%L`
+(time *remaining*) sidesteps the conversion entirely and is the safer
+thing to key on.
+
 Every successor was submitted ~1 second *before* its predecessor's end, so
 the entire gap is unserved queue wait. ~18h of downtime across six days,
 on the fleet's only `scitex-ci` runner path. Nothing failed. No marker was

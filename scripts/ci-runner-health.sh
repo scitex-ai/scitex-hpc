@@ -86,7 +86,13 @@ for d in "$CI"/actions-runner-*/; do
     # Matching the nominal path finds nothing and this check fails OPEN.
     real="$(readlink -f "$d" 2>/dev/null)" || real=""
     [ -n "$real" ] || real="$d"
-    n_listeners="$(pgrep -c -f "^$real/bin/Runner.Listener" 2>/dev/null || echo 0)"
+    # Count with `wc -l`, NOT `pgrep -c ... || echo 0`. `pgrep -c` prints "0"
+    # AND exits 1 when nothing matches, so the `||` fallback appends a SECOND
+    # value: n_listeners becomes "0\n0", matches neither the 0 nor the 1 case,
+    # and falls through to the duplicate branch. A runner with NO listener then
+    # reports DUPLICATE — the exact opposite of its actual fault. `wc -l`
+    # always emits one clean integer and never fails.
+    n_listeners="$(pgrep -f "^$real/bin/Runner.Listener" 2>/dev/null | wc -l)"
 
     case "$n_listeners" in
         1) listener_status="OK" ;;

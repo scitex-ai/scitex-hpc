@@ -47,6 +47,12 @@ set -uo pipefail
 
 CI="${CI_ROOT:-/data/gpfs/projects/punim0264/ywatanabe/ci}"
 
+# Org every CI runner should be registered against after the 2026-07 migration.
+EXPECTED_ORG="${EXPECTED_ORG:-scitex-ai}"
+# Repos that legitimately remain under the personal account -- verified against
+# the scitex-ai org listing 2026-07-21, not assumed.
+PERSONAL_REPOS="${PERSONAL_REPOS:-.dotfiles neurovista scitex-audit scitex-core scitex-todo}"
+
 [ -d "$CI" ] || { echo "FATAL: runner root not found: $CI" >&2; exit 2; }
 
 # Refuse to run somewhere the answer would be meaningless. A login node has no
@@ -61,6 +67,7 @@ fi
 
 rc=0
 checked=0
+warned=0
 
 for d in "$CI"/actions-runner-*/; do
     d="${d%/}"
@@ -78,6 +85,43 @@ for d in "$CI"/actions-runner-*/; do
         work_status="UNWRITABLE"
     else
         rm -f "$probe"
+    fi
+
+    # --- REGISTRATION URL ------------------------------------------------
+    # A runner whose stored gitHubUrl points at a repo that has since been
+    # TRANSFERRED keeps working indefinitely -- GitHub binds it by stored
+    # credentials, not by the URL string. The URL only matters when the runner
+    # has to RE-REGISTER. So this is a recovery hazard, not an outage, and it
+    # is invisible until the day it matters:
+    #
+    #   runner drops offline long enough for GitHub to delete its registration
+    #     -> config.sh posts the stale URL to /actions/runner-registration
+    #     -> 404, and that repo's CI stays dead until someone works out why
+    #
+    # Measured 2026-07-21: 64 of 69 runners on ywatanabe1989/ URLs pointed at
+    # repos already transferred to scitex-ai/. scitex-config had already died
+    # this exact way.
+    #
+    # The trap when diagnosing it: `gh api repos/<old-owner>/<repo>` SUCCEEDS,
+    # because the API silently follows the transfer redirect. Every read
+    # reinforces the wrong URL. config.sh does NOT follow it.
+    #
+    # Checked locally against an expected org so this needs no API access
+    # (it runs on a compute node). EXPECTED_ORG / PERSONAL_REPOS are
+    # overridable; the defaults encode the 2026-07 migration.
+    url_status="OK"
+    if [ -f "$d/.runner" ]; then
+        # .runner is UTF-8 with a BOM; plain json parsers choke on it, so match
+        # textually rather than decoding.
+        url="$(tr -d '\000' < "$d/.runner" | grep -o 'https://github\.com/[^"]*' | head -1)"
+        owner="$(echo "$url" | awk -F/ '{print $4}')"
+        repo="$(echo "$url" | awk -F/ '{print $5}')"
+        if [ -n "$owner" ] && [ "$owner" != "$EXPECTED_ORG" ]; then
+            case " $PERSONAL_REPOS " in
+                *" $repo "*) : ;;   # genuinely still a personal repo
+                *) url_status="STALE-ORG($owner/$repo)" ;;
+            esac
+        fi
     fi
 
     # --- LISTENERS -------------------------------------------------------
@@ -100,11 +144,23 @@ for d in "$CI"/actions-runner-*/; do
         *) listener_status="DUPLICATE($n_listeners)" ;;
     esac
 
+    # A stale registration URL is a WARN, deliberately NOT a failure. Those
+    # runners are serving jobs right now; only their future RE-registration is
+    # broken. Failing on them would turn this detector red for ~64 of 80
+    # runners and bury the two or three that genuinely cannot take work --
+    # which is how a check gets ignored, and then gets ignored on the day it
+    # matters. Exit status answers "can these runners take work NOW"; WARN
+    # carries the latent hazard without competing with it.
     if [ "$work_status" = "OK" ] && [ "$listener_status" = "OK" ]; then
-        printf 'OK      %-45s work=OK listeners=1\n' "$tag"
+        if [ "$url_status" = "OK" ]; then
+            printf 'OK      %-45s work=OK listeners=1\n' "$tag"
+        else
+            printf 'WARN    %-45s work=OK listeners=1 url=%s\n' "$tag" "$url_status"
+            warned=$((warned + 1))
+        fi
     else
-        printf 'UNHEALTHY %-43s work=%s listeners=%s\n' \
-               "$tag" "$work_status" "$listener_status"
+        printf 'UNHEALTHY %-43s work=%s listeners=%s url=%s\n' \
+               "$tag" "$work_status" "$listener_status" "$url_status"
         rc=1
     fi
 done
@@ -114,5 +170,5 @@ if [ "$checked" -eq 0 ]; then
     exit 2
 fi
 
-echo "--- checked $checked runner(s) on $(hostname -s); exit $rc"
+echo "--- checked $checked runner(s) on $(hostname -s); $warned with stale registration URL (WARN, still serving); exit $rc"
 exit "$rc"

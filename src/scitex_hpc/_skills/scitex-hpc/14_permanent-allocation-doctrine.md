@@ -7,10 +7,16 @@ description: |
   to empirically verify the real achievable walltime (sacctmgr + sbatch
   --test-only, since sinfo's MaxTime is a ceiling, not a guarantee); how
   to get freshness without re-queuing (container + overlay per unit of
-  work); the "zero failing steps" lost-runner detection rule. Grounded in
-  the 2026-07-13 CI-supervisor incident (resubmit trap fired, `sbatch`
-  wasn't on PATH after env hardening, ~74 runners died silently for
-  15-20min with no alarm).
+  work); the "zero failing steps" lost-runner detection rule. The resubmit
+  chain's FOUR failure modes: it doesn't fire; it fires and the successor
+  waits in the queue (16h measured outage — submit EARLY, not at death); a
+  healthy SIGUSR1 hop records FAILED/138 so State-keyed monitoring is
+  inverted (monitor the OUTCOME, level-triggered on zero); and
+  `sbatch "$0"` resubmits the SPOOL COPY, so the script can exist nowhere
+  else on disk. Grounded in the 2026-07-13 CI-supervisor incident (resubmit
+  trap fired, `sbatch` wasn't on PATH after env hardening, ~74 runners died
+  silently for 15-20min with no alarm) and the 2026-07-19 pooled-supervisor
+  measurements.
 tags: [scitex-hpc-permanent-allocation-doctrine, scitex-hpc, scitex-package]
 ---
 
@@ -90,7 +96,7 @@ inside the confirmed 30-day ceiling, chosen for fewer renewals with
 headroom against contention at submission time; qwen runs 7-day walltime
 on `gpu-h100`, at that partition's confirmed ceiling (GPU has less slack).
 
-### The resubmit pattern — and its one real failure mode
+### The resubmit pattern — and its four real failure modes
 
 ```bash
 #SBATCH --signal=B:USR1@3600   # SLURM signals 1h before the walltime boundary
@@ -99,53 +105,18 @@ trap _resubmit USR1
 
 SLURM's documented signaling mechanism (see
 [12_reservation-features.md](12_reservation-features.md) for the
-`Reservation(persistent=True)` wrapper) — not a daemon, not a cron
-@reboot, compatible with the no-daemon IT Security ruling
+`Reservation(persistent=True)` wrapper) — not a daemon, not a cron @reboot,
+compatible with the no-daemon IT Security ruling
 ([13_compatibility-policies.md](13_compatibility-policies.md)).
-**A permanent allocation WILL hit its walltime boundary; the only question
-is whether the handoff to a successor job is verified, or merely hoped
-for.** On 2026-07-13 the CI supervisor's trap fired on schedule, but the
-resubmit call itself —
 
-```bash
-_resubmit() { sbatch "$0"; }   # WRONG: assumes `sbatch` is still on PATH
-```
+**A permanent allocation WILL hit its walltime boundary; the only question is
+whether the handoff to a successor job is verified, or merely hoped for.**
+Three of the four ways it fails are SILENT, and one of them makes SLURM's own
+`State` field actively misleading.
 
-— failed with `sbatch: command not found`: the script's own env-hardening
-(`module purge` + a PATH scrub for secret/easybuild isolation) ran *after*
-the trap was registered but had already stripped `/apps/slurm/latest/bin`
-off PATH by the time USR1 fired. No successor job was ever submitted.
-SLURM recorded the exit as `FAILED/138` (`128+SIGUSR1`) — a code that
-reads as "killed by a signal", not "resubmit silently no-op'd". All ~76
-dependent runners died with zero alarm, caught only by a human/agent
-noticing the job had vanished from `squeue` 15-20 minutes later.
-**The durable pattern, not just the one-off fix:**
-
-```bash
-# Resolve the resubmit binary's ABSOLUTE PATH before any env hardening runs.
-SBATCH_BIN="$(command -v sbatch 2>/dev/null)"
-[ -x "$SBATCH_BIN" ] || SBATCH_BIN="/apps/slurm/latest/bin/sbatch"
-
-_resubmit() {
-  if [ -x "$SBATCH_BIN" ] && "$SBATCH_BIN" "$0"; then
-    rm -f "$FAIL_MARKER" 2>/dev/null
-  else
-    # FAIL LOUD: a silent no-op resubmit is worse than a visible crash —
-    # nothing else in the system knows to page anyone.
-    echo "$(date -u +%FT%TZ) resubmit failed; SBATCH_BIN='$SBATCH_BIN'" \
-      > "$FAIL_MARKER"
-  fi
-}
-trap _resubmit USR1
-# ... only THEN do module purge / PATH scrubbing / secret hardening ...
-```
-
-Any script that hardens its own environment and *also* self-resubmits must
-resolve the resubmit binary before the hardening step — hardening can
-silently break a mechanism defined earlier in the same script. A sentinel
-file alone is necessary but not sufficient: something must actually watch
-it and alert (a genuinely independent check, not the script policing
-itself — the single point of failure that failed here).
+Full treatment, with the measurements:
+**[16_resubmit-chain-failure-modes.md](16_resubmit-chain-failure-modes.md)**.
+Read it before building a supervisor, and before building monitoring for one.
 
 ### Concurrency inside the held allocation: `srun --overlap`
 

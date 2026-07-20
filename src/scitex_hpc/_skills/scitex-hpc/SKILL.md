@@ -47,6 +47,7 @@ compute — every command is wrapped in `srun`/`sbatch` via a login-shell SSH.
 - [12_reservation-features.md](12_reservation-features.md) — walltime auto-resubmit, tmux bootstrap, adopt-existing-jobid
 - [13_compatibility-policies.md](13_compatibility-policies.md) — no-daemon policy, login-shell wrapping, state files, empirical guarantees, source layout
 - [14_permanent-allocation-doctrine.md](14_permanent-allocation-doctrine.md) — when to hold a permanent allocation vs. dispatch one-shot; durable self-resubmit (verify + fail loud); `srun --overlap` concurrency; freshness via container+overlay, not re-queuing; the zero-failing-steps lost-runner signature
+- [16_resubmit-chain-failure-modes.md](16_resubmit-chain-failure-modes.md) — the four ways a SIGUSR1 self-resubmit chain fails, three of them silently: it doesn't fire; it fires and the successor waits in the queue (16h measured outage — submit EARLY and serve out the full walltime); a healthy hop records `FAILED/138` so State-keyed monitoring is INVERTED (monitor the outcome, level-triggered on zero); and `sbatch "$0"` resubmits the SPOOL COPY, so the script can exist nowhere else on disk
 - [15_spartan-identity-access-traps.md](15_spartan-identity-access-traps.md) — why a multiplexed ssh session reads the PAST and makes a group revocation look like a "flap"; probing authoritatively (`ControlPath=none`, `getent group` over cached `id`); why losing a project group breaks shell init when `$HOME` dotdirs symlink into it; SLURM Account ≠ POSIX group
 
 ### Meta (20+)

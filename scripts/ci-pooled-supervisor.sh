@@ -86,6 +86,26 @@ _spawn_keepalive() {
     done
   ) &
 }
+# Is a live listener already serving this runner directory?
+#
+# The marker file records that we ONCE spawned a keepalive; it is not
+# evidence that one is alive, and it is not evidence that one is absent.
+# The process table is. This is a positive check against the actual world,
+# so it holds no matter how a marker is lost, duplicated, or raced.
+#
+# MUST resolve the path first. A runner directory may be a SYMLINK into this
+# tree (that is how a runner from a dead supervisor's pool is adopted by a
+# surviving allocation), and the listener process reports its RESOLVED path
+# in argv. Matching the symlink path finds nothing, so the guard would fail
+# OPEN and cheerfully spawn the duplicate it exists to prevent -- silently,
+# and only for adopted runners, which are exactly the ones in an unusual
+# enough state to warrant the check. Verified against a live grafted runner:
+# symlink pattern NO-MATCH, resolved pattern MATCH.
+_listener_running() {
+  _real="$(readlink -f "$1" 2>/dev/null)" || _real=""
+  [ -n "$_real" ] || _real="$1"
+  pgrep -f "^$_real/bin/Runner.Listener" >/dev/null 2>&1
+}
 _scan_and_spawn() {
   for d in "$CI"/actions-runner-*/; do
     d="${d%/}"
@@ -94,6 +114,20 @@ _scan_and_spawn() {
     tag="$(basename "$d")"; tag="${tag#actions-runner-}"
     marker="$TRACKED_DIR/$tag"
     [ -f "$marker" ] && continue
+    # NEVER run two keepalive loops for one runner. Each loop does
+    # `rm -rf "$wd/_temp"` on every iteration, so a second loop deletes the
+    # first listener's job temp directory out from under its worker: the
+    # worker stalls, the listener keeps renewing the job once a minute, and
+    # the run burns to its timeout having executed ZERO steps. Observed
+    # 2026-07-21 on two runners; the marker files were intact throughout, so
+    # marker-based dedup alone did not prevent it and the provenance of the
+    # duplicate loops was never established. Hence this check, which does not
+    # depend on knowing how the duplication happened.
+    if _listener_running "$d"; then
+      echo "[pooled-supervisor] $tag already has a live listener; adopting marker, NOT spawning a second keepalive" >&2
+      touch "$marker"
+      continue
+    fi
     touch "$marker"
     echo "[pooled-supervisor] $([ "$2" = "rescan" ] && echo "rescan found new" || echo "launching") keepalive for $tag" >&2
     _spawn_keepalive "$d"

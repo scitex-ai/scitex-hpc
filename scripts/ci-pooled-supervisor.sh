@@ -101,6 +101,18 @@ _spawn_keepalive() {
 # and only for adopted runners, which are exactly the ones in an unusual
 # enough state to warrant the check. Verified against a live grafted runner:
 # symlink pattern NO-MATCH, resolved pattern MATCH.
+#
+# SCOPE LIMIT -- READ THIS BEFORE RELYING ON IT. `pgrep` reads the LOCAL
+# node's process table, so this guard prevents duplicate loops WITHIN one
+# allocation. It CANNOT see a listener for the same runner started by a
+# DIFFERENT supervisor on a DIFFERENT node, and two supervisors serving one
+# runner registration produce SessionConflictException plus the same
+# _temp race this guard exists to prevent.
+#
+# Practical consequence: never run two supervisors over overlapping runner
+# sets. In particular, do not submit this script while its runners are
+# grafted into another allocation's tree -- retire the graft FIRST. See
+# scripts/README.md "Cutting over".
 _listener_running() {
   _real="$(readlink -f "$1" 2>/dev/null)" || _real=""
   [ -n "$_real" ] || _real="$1"

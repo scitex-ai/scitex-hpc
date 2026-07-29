@@ -21,6 +21,7 @@ import json as _json
 import sys
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand, SpecGroup
 
 from ..login_guard import (
     PROFILES,
@@ -34,19 +35,42 @@ from ..login_guard import (
 _PROFILE_CHOICE = click.Choice(sorted(PROFILES))
 
 
-@click.group("sentinel")
+@click.group(
+    "sentinel",
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary=(
+            "HPC login-node guardrail (heavy compute + protected-path "
+            "du/find)."
+        ),
+        description=(
+            "Config-driven via profiles (default: spartan). Shell-function "
+            "overrides refuse the TeX toolchain AND du/find walks over "
+            "protected filesystem prefixes on login hosts OUTSIDE a SLURM "
+            "job; a no-op inside jobs and on compute nodes, so CI runners "
+            "are unaffected. Incidents: 2026-07-01."
+        ),
+    ),
+)
 def login_guard() -> None:
-    """HPC login-node guardrail (heavy compute + protected-path du/find).
-
-    \b
-    Config-driven via profiles (default: spartan). Shell-function overrides
-    refuse the TeX toolchain AND du/find walks over protected filesystem
-    prefixes on login hosts OUTSIDE a SLURM job; a no-op inside jobs and on
-    compute nodes, so CI runners are unaffected. Incidents: 2026-07-01.
-    """
+    pass
 
 
-@login_guard.command("show")
+@login_guard.command(
+    "show",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Print the rendered guard script (or the install script).",
+        examples=(
+            Example("{prog} sentinel show", "Render the spartan guard."),
+            Example(
+                "{prog} sentinel show --script",
+                "Render the remote install script instead.",
+            ),
+            Example("{prog} sentinel show --json", "Structured JSON output."),
+        ),
+    ),
+)
 @click.option(
     "--profile",
     default="spartan",
@@ -65,14 +89,6 @@ def login_guard() -> None:
     help='Emit JSON ({"profile","kind","content"}) for machine consumers.',
 )
 def show_cmd(profile: str, script: bool, as_json: bool) -> None:
-    """Print the rendered guard script (or the install script).
-
-    \b
-    Example:
-      $ scitex-hpc sentinel show
-      $ scitex-hpc sentinel show --profile spartan --script
-      $ scitex-hpc sentinel show --json
-    """
     prof = get_profile(profile)
     content = build_install_script(profile=prof) if script else guard_text(prof)
     if as_json:
@@ -89,7 +105,30 @@ def show_cmd(profile: str, script: bool, as_json: bool) -> None:
     click.echo(content, nl=False)
 
 
-@login_guard.command("install")
+@login_guard.command(
+    "install",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Deploy the guard to HOST over SSH (safe + idempotent).",
+        description=(
+            "Copies the guard to ~/.scitex/hpc/login-guard.sh, backs up "
+            "~/.bashrc, `bash -n`-validates a candidate, and inserts the "
+            "source line ABOVE the interactive-return guard so "
+            "non-interactive `ssh host '<cmd>'` is covered too. Default is "
+            "DRY-RUN; pass --yes to deploy."
+        ),
+        examples=(
+            Example(
+                "{prog} sentinel install --host spartan",
+                "Dry-run: print what would be deployed.",
+            ),
+            Example(
+                "{prog} sentinel install --host spartan --yes",
+                "Deploy for real over SSH.",
+            ),
+        ),
+    ),
+)
 @click.option(
     "--profile",
     default="spartan",
@@ -109,19 +148,6 @@ def show_cmd(profile: str, script: bool, as_json: bool) -> None:
     help="Deploy for real over SSH (required; overrides the default dry-run).",
 )
 def install_cmd(profile: str, host: str, dry_run: bool, yes: bool) -> None:
-    """Deploy the guard to HOST over SSH (safe + idempotent).
-
-    \b
-    Copies the guard to ~/.scitex/hpc/login-guard.sh, backs up ~/.bashrc,
-    bash -n-validates a candidate, and inserts the source line ABOVE the
-    interactive-return guard (so non-interactive ``ssh host '<cmd>'`` is
-    covered too). Default is DRY-RUN; pass --yes to deploy.
-
-    \b
-    Example:
-      $ scitex-hpc sentinel install --host spartan        # dry-run
-      $ scitex-hpc sentinel install --host spartan --yes
-    """
     prof = get_profile(profile)
     # Safe by default: only a bare ``--yes`` leaves dry-run and deploys.
     if dry_run and not yes:

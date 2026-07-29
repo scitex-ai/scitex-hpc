@@ -5,27 +5,40 @@ from __future__ import annotations
 import json as _json
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand, SpecGroup
 
 
-@click.group("mcp", invoke_without_command=True)
+@click.group(
+    "mcp",
+    invoke_without_command=True,
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary="MCP (Model Context Protocol) server commands.",
+    ),
+)
 @click.pass_context
 def mcp_group(ctx):
-    """MCP (Model Context Protocol) server commands."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
 
-@mcp_group.command("start")
+@mcp_group.command(
+    "start",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Start the scitex-hpc MCP server (stdio transport).",
+        examples=(
+            Example("{prog} mcp start", "Start the server."),
+            Example(
+                "{prog} mcp start --dry-run",
+                "Print the launch plan without starting.",
+            ),
+        ),
+    ),
+)
 @click.option("--dry-run", is_flag=True, help="Print launch plan without starting.")
 @click.option("-y", "--yes", "yes", is_flag=True, help="Skip confirmation prompt.")
 def mcp_start(dry_run: bool, yes: bool):
-    """Start the scitex-hpc MCP server (stdio transport).
-
-    \b
-    Example:
-      $ scitex-hpc mcp start
-      $ scitex-hpc mcp start --dry-run
-    """
     del yes
     if dry_run:
         click.echo("DRY RUN — would start scitex-hpc MCP server (stdio transport)")
@@ -40,14 +53,17 @@ def mcp_start(dry_run: bool, yes: bool):
     mcp_server.run()
 
 
-@mcp_group.command("doctor")
+@mcp_group.command(
+    "doctor",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Check MCP server health and dependencies.",
+        examples=(
+            Example("{prog} mcp doctor", "Report fastmcp + server importability."),
+        ),
+    ),
+)
 def mcp_doctor():
-    """Check MCP server health and dependencies.
-
-    \b
-    Example:
-      $ scitex-hpc mcp doctor
-    """
     click.secho("scitex-hpc MCP Doctor", fg="cyan", bold=True)
     click.echo()
     all_ok = True
@@ -72,18 +88,21 @@ def mcp_doctor():
         click.secho("Some checks failed.", fg="red")
 
 
-@mcp_group.command("list-tools")
+@mcp_group.command(
+    "list-tools",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="List MCP tools exposed by scitex-hpc.",
+        examples=(
+            Example("{prog} mcp list-tools", "Tool names only."),
+            Example("{prog} mcp list-tools -vv", "Names plus parameters."),
+            Example("{prog} mcp list-tools --json", "Structured JSON output."),
+        ),
+    ),
+)
 @click.option("-v", "--verbose", count=True, help="-v names, -vv params, -vvv docs.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def mcp_list_tools(verbose, as_json):
-    """List MCP tools exposed by scitex-hpc.
-
-    \b
-    Example:
-      $ scitex-hpc mcp list-tools
-      $ scitex-hpc mcp list-tools -vv
-      $ scitex-hpc mcp list-tools --json
-    """
     tools: list = []
     try:
         import asyncio
@@ -128,18 +147,21 @@ def mcp_list_tools(verbose, as_json):
             click.echo()
 
 
-@mcp_group.command("install")
+@mcp_group.command(
+    "install",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Show MCP installation and configuration instructions.",
+        examples=(
+            Example("{prog} mcp install", "Human-readable instructions."),
+            Example("{prog} mcp install --json", "Machine-readable config block."),
+        ),
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.option("--dry-run", is_flag=True, help="Preview without writing anything.")
 @click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt.")
 def mcp_install(as_json: bool, dry_run: bool, yes: bool):
-    """Show MCP installation and configuration instructions.
-
-    \b
-    Example:
-      $ scitex-hpc mcp install
-      $ scitex-hpc mcp install --json
-    """
     del dry_run, yes  # `install` only prints today; flags reserved for parity
     config = {
         "mcpServers": {

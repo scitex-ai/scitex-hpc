@@ -122,23 +122,49 @@ auto-resubmits before it expires.
 | ------------------------------- | ------------------ | ------------------------------------------ |
 | a runner's `run.sh` exits/crashes | supervisor       | keep-alive loop re-runs it after backoff   |
 | walltime approaching            | Reservation trap   | SIGUSR1 → `sbatch "$0"` resubmits in place |
-| whole allocation gone           | operator (alarmed) | monitor exits 2 + alarm; rebook explicitly |
-| a keep-alive loop wedged        | operator (alarmed) | monitor exits 1 + alarm + `.needs-restart` |
-| supervisor never registered     | operator (alarmed) | monitor exits 3 + alarm; re-exec supervisor |
-| runner fileset out of inodes    | operator (alarmed) | monitor exits 4 + alarm; free inodes        |
+| whole allocation gone           | operator (alarmed) | monitor exits 11 + alarm; rebook explicitly |
+| a keep-alive loop wedged        | operator (alarmed) | monitor exits 10 + alarm + `.needs-restart` |
+| supervisor never registered     | operator (alarmed) | monitor exits 12 + alarm; re-exec supervisor |
+| runner fileset out of inodes    | operator (alarmed) | monitor exits 13 + alarm; free inodes        |
 
 ## Monitor exit-code / alarm contract
 
+Domain verdicts start at **10**, never at 1 or 2.
+
 - `exit 0` — fleet healthy (one-line `OK` to stdout, incl. current inode %)
-- `exit 1` — degraded: some runners down — alarm fired, names listed
-- `exit 2` — allocation gone / unreachable — alarm fired
-- `exit 3` — supervisor UNREGISTERED (no holder-jobid file; the
+- `exit 10` — degraded: some runners down — alarm fired, names listed
+- `exit 11` — allocation gone / unreachable — alarm fired
+- `exit 12` — supervisor UNREGISTERED (no holder-jobid file; the
   `ci-runners watch` / `overlap_jobid_file` deploy) — alarm fired
-- `exit 4` — runner install fileset at/above the inode threshold
+- `exit 13` — runner install fileset at/above the inode threshold
   (default 90 %); Listeners may be up but Workers can't create files, so
   jobs phantom `in_progress` — alarm fired, free inodes
 - Alarm command: `$SCITEX_CI_ALARM_CMD` (stdin = `subject\nbody`), else
   the fleet `notify.sh` helper, else stderr (cron mails it).
+
+### Why 10+ (renumbered 2026-07-29)
+
+These verdicts were `1/2/3/4`. `1` and `2` already mean "generic failure"
+and "usage error" in every shell and CLI framework, so anything that killed
+the monitor **before it measured anything** — an ImportError, a renamed
+module, a bad interpreter path — exited `1` and was read as the verdict
+*"degraded: some runners down"*.
+
+That is worse than a crash, because it is **actionable-looking**: the
+operator goes hunting for downed runners that were never down, and a
+monitor that never ran reports a plausible fleet state. Reserving the low
+range keeps "did not run" distinguishable from "ran and found trouble".
+
+**Teach the supervisor the non-failure codes**, or this is undone one layer
+up. Under `cron`, any non-zero mails — which is what we want. Under
+systemd, the wrapping unit needs:
+
+```ini
+SuccessExitStatus=10 11 12 13
+```
+
+Otherwise a correct multi-state answer is collapsed back to two-state by
+the supervisor reporting every verdict as a unit FAILURE.
 
 ## Why not the old `~` scripts?
 

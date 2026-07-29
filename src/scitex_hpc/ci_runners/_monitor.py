@@ -13,16 +13,38 @@ Each tick it, over a single SSH login shell to the cluster:
      persists across two ticks means the loop itself is wedged -> the
      monitor logs it and ALARMS, naming the dead runners.
 
-The monitor's contract is explicit and cron-friendly:
+The monitor's contract is explicit and cron-friendly. **Domain verdicts
+start at 10, never at 1 or 2** — see "Why 10+" below:
 
-  * exit 0  -> fleet healthy
-  * exit 1  -> degraded (some runners down) — alarm fired
-  * exit 2  -> allocation gone / unreachable — alarm fired
-  * exit 4  -> runner fileset out of inodes — alarm fired (listeners are
+  * exit 0   -> fleet healthy
+  * exit 10  -> degraded (some runners down) — alarm fired
+  * exit 11  -> allocation gone / unreachable — alarm fired
+  * exit 12  -> supervisor UNREGISTERED (no holder-jobid file) — alarm fired
+  * exit 13  -> runner fileset out of inodes — alarm fired (listeners are
     up but Workers cannot create files, so jobs silently phantom; the
     2026-07-06 GPFS inode-wall outage the listener check was blind to)
   * a one-line human summary goes to stdout every tick; failures also go
     to stderr so ``cron`` mails them and any wrapper sees them.
+
+**Why 10+ (changed 2026-07-29).** This script previously used 1/2/3/4 for
+those four verdicts. ``1`` and ``2`` already mean "generic failure" and
+"usage error" in every shell and CLI framework, so anything that killed the
+script *before it measured anything* — an ImportError, a renamed module, a
+bad interpreter path, a syntax error — exited 1 and was read as the verdict
+"degraded: some runners down". That is worse than a crash, because it is
+ACTIONABLE-LOOKING: the operator goes hunting for downed runners that were
+never down, and a monitor that never ran reports a plausible fleet state.
+Moving domain meanings out of the reserved low range makes a script that
+did not run distinguishable from a fleet that is unhealthy.
+
+**Supervisors must be taught the non-failure codes**, or this is undone one
+layer up. Under ``cron`` any non-zero simply mails, which is what we want.
+Under systemd, a unit wrapping this script needs::
+
+    SuccessExitStatus=10 11 12 13
+
+otherwise a correct three-state answer is collapsed back to two-state by
+the supervisor reporting every verdict as a unit FAILURE.
 
 Alarm wiring is a single, swappable command. By default it tries the
 fleet ``notify.sh`` helper if present; the operator overrides it with
@@ -83,13 +105,13 @@ def build_monitor_script(
     instead of a build-time id, the script reads the current holder id from
     a file on the cluster (written by exec-supervisor) at RUNTIME — so it
     survives the id churn of a walltime-resubmit. A missing/empty file exits
-    3 ("supervisor UNREGISTERED"), distinct from exit 2 (allocation down),
+    12 ("supervisor UNREGISTERED"), distinct from exit 11 (allocation down),
     rather than false-alarming a live-but-unnamed overlap step.
 
     ``inode_path`` is the path whose fileset the monitor checks for inode
     headroom (defaults to ``fleet.ci_base`` — the fileset the runner install
     dirs live on). If that fileset is at/above ``inode_threshold_pct`` inodes
-    used, the monitor ALARMS and exits 4: the listeners can be perfectly
+    used, the monitor ALARMS and exits 13: the listeners can be perfectly
     alive while every job phantoms, because a full-inode fileset stops the
     Worker from creating its ``_diag``/``_work``/job-temp files (the
     2026-07-06 outage). ``df -i`` is read-only.
@@ -126,7 +148,7 @@ def build_monitor_script(
             "Launch: scitex-hpc ci-runners exec-supervisor --overlap-jobid "
             '<holder> (operator action)."\n'
             '  echo "$TS CRITICAL supervisor-unregistered"\n'
-            "  exit 3\n"
+            "  exit 12\n"
             "fi\n"
         )
     elif overlap_jobid:
@@ -181,7 +203,7 @@ if [ "${{STATE:-}}" != "RUNNING" ] || [ -z "${{JOBID:-}}" ] || [ -z "${{NODE:-}}
   alarm "scitex-ci: supervisor allocation DOWN" \\
     "{target_ident} on $HOST is not RUNNING (state='${{STATE:-none}}'). {recover_hint}"
   echo "$TS CRITICAL allocation-down state=${{STATE:-none}}"
-  exit 2
+  exit 11
 fi
 
 # --- 2. per-runner listener liveness on the compute node --------------
@@ -212,7 +234,7 @@ if [ "${{#down[@]}}" -gt 0 ]; then
   alarm "scitex-ci: ${{#down[@]}} runner(s) DOWN on $NODE" \\
     "Down: ${{down[*]}}. Supervisor keep-alive should relaunch within the restart backoff; alarming so the operator can confirm recovery."
   echo "$TS DEGRADED node=$NODE down=${{down[*]}}"
-  exit 1
+  exit 10
 fi
 
 # --- 3. runner fileset inode headroom ---------------------------------
@@ -230,7 +252,7 @@ if [ -n "$IUSE" ] && [ "$IUSE" -ge {inode_threshold_pct} ] 2>/dev/null; then
   alarm "scitex-ci: runner fileset inode-critical (${{IUSE}}%)" \\
     "{inode_target} on $HOST is at ${{IUSE}}% inodes (>= {inode_threshold_pct}%). Listeners are up but Workers cannot create files -> jobs will phantom in_progress. Free inodes (stale _work/_diag, per-run session dirs) before CI wedges."
   echo "$TS CRITICAL inode-wall iuse=${{IUSE}}%"
-  exit 4
+  exit 13
 fi
 
 echo "$TS OK node=$NODE runners=$(echo "$RUNNER_NAMES" | wc -w) inodes=${{IUSE:-?}}%"

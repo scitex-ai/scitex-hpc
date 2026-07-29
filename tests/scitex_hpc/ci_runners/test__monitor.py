@@ -24,22 +24,43 @@ def test_monitor_is_bash_script():
     assert script.startswith("#!/usr/bin/env bash")
 
 
-def test_monitor_exits_2_on_allocation_down():
+def test_monitor_exits_11_on_allocation_down():
     # Arrange
     fleet = _fleet("a")
     # Act
     script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
-    # Assert — critical path uses exit code 2
-    assert "exit 2" in script
+    # Assert — allocation-gone verdict, in the 10+ domain range
+    assert "exit 11\n" in script
 
 
-def test_monitor_exits_1_when_runners_down():
+def test_monitor_exits_10_when_runners_down():
     # Arrange
     fleet = _fleet("a")
     # Act
     script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
     # Assert
-    assert "exit 1" in script
+    assert "exit 10\n" in script
+
+
+def test_monitor_never_uses_exit_1_as_a_verdict():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
+    # Assert — 1 is the shell's generic-failure code. If the monitor ever
+    # spends it on a domain meaning, an ImportError or renamed module exits 1
+    # BEFORE measuring anything and is read as "degraded: some runners down" —
+    # an actionable-looking verdict from a script that never ran.
+    assert "exit 1\n" not in script
+
+
+def test_monitor_never_uses_exit_2_as_a_verdict():
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
+    # Assert — 2 is the conventional usage-error code; same impersonation risk.
+    assert "exit 2\n" not in script
 
 
 def test_monitor_has_alarm_contract():
@@ -134,7 +155,7 @@ def test_monitor_jobid_file_resolves_holder_from_file():
     assert "HOLDER_JOBID=" in script
 
 
-def test_monitor_jobid_file_exits_3_when_unregistered():
+def test_monitor_jobid_file_exits_12_when_unregistered():
     # Arrange
     fleet = _fleet("a")
     # Act
@@ -143,7 +164,7 @@ def test_monitor_jobid_file_exits_3_when_unregistered():
         overlap_jobid_file="$HOME/.scitex/hpc/runtime/holder.jobid",
     )
     # Assert — a missing/empty file is a DISTINCT exit (not false allocation-down)
-    assert "exit 3" in script
+    assert "exit 12\n" in script
 
 
 def test_monitor_jobid_file_squeue_uses_resolved_id():
@@ -175,13 +196,13 @@ def test_monitor_jobid_file_still_never_scancels():
 # ---------------------------------------------------------------------------
 
 
-def test_monitor_exits_4_on_inode_wall():
+def test_monitor_exits_13_on_inode_wall():
     # Arrange
     fleet = _fleet("a")
     # Act
     script = build_monitor_script(fleet, host="spartan", lease_name="fleet")
     # Assert — a distinct exit code for the inode-critical case
-    assert "exit 4" in script
+    assert "exit 13\n" in script
 
 
 def test_monitor_checks_inodes_with_df_i():

@@ -157,29 +157,11 @@ broke that repo's releases for hours, because nothing ever discarded its
 mutable state is N places for it to rot; a shared base image + a
 disposable overlay per job removes the "N places" entirely.
 
-> **⚠ THIS SECTION IS THE TARGET DESIGN, NOT WHAT IS DEPLOYED.**
-> Measured 2026-07-29 against `src/scitex_hpc/ci_runners/`:
->
-> - `rg` for `apptainer|singularity|.sif|overlay` across that package returns
->   **zero hits**, against a passing positive control.
-> - The generated keep-alive body runs `./run.sh` directly on the compute
->   node with `PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"`.
->
-> **There is no container and no per-job overlay in the CI job path today.**
-> Jobs run bare on the node under the operator's real `$HOME`, shared by the
-> whole fleet. What IS live is narrower than this section implies: the
-> `JOB_COMPLETED` hook clearing `$RUNNER_TEMP`, and the `_diag` log pruner.
->
-> Read this section as the destination. Three separate agents reasoned from
-> it as if it were the implementation on 2026-07-29 and reached wrong
-> conclusions — one nearly repointed a CI job onto a node it believed was
-> isolated; another designed a per-job `$HOME` that would have been an env
-> var with no boundary underneath it. The shared-`$HOME` `.gitconfig`
-> pollution incident (35,327 `safe.directory` lines, 4.3 MB, in the dotfiles
-> SSoT) is the direct consequence of the overlay *not* existing.
->
-> **Before reasoning from this section, verify the job path in code.**
-> Doctrine is not deployment — see `16_verifying-a-fix-is-live.md`.
+> **⚠ TARGET DESIGN, NOT DEPLOYED.** Measured 2026-07-29: `ci_runners/` has
+> zero `apptainer|singularity|.sif|overlay` hits (positive control passed) and
+> runs `./run.sh` bare on the node under a fleet-shared `$HOME`. Three agents
+> read this as implementation and reached wrong conclusions.
+> See `16_verifying-a-fix-is-live.md`.
 
 ## Detection rule: zero failing steps means a lost runner, not a flaky test
 

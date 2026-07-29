@@ -1,4 +1,21 @@
-# Verifying a fix is live — three ways a fix reads as applied and is not
+---
+description: |
+  [TOPIC] Verifying a Fix Is Actually Live
+  [DETAILS] Four ways a fix reads as applied and is not — declared-not-applied,
+  applied-in-wrong-place, layers-disagree, and doctrine-as-description. Why the
+  applied-in-wrong-place shape needs a SECOND observer (by construction the
+  first one sees green) and is the only shape that DESTROYS the signal; why a
+  job log cannot testify about the launcher (read /proc/<pid>/environ of the
+  process that does the work); merged != deployed != effective-in-production,
+  which generated artifacts make easy to confuse; why a flake rate is the wrong
+  statistic for a compounding failure; and why a test that cannot separate the
+  hypotheses is UNKNOWN rather than a refutation. Grounded in 2026-07-29, when
+  five agents filed six cards for one root cause and a required audit gate was
+  measured grading a different commit than the one under test.
+tags: [scitex-hpc-verifying-a-fix-is-live, scitex-hpc, scitex-package]
+---
+
+# Verifying a fix is live — four ways a fix reads as applied and is not
 
 All three shapes below were measured on this fleet on **2026-07-29**, in one
 afternoon, by five different agents who each believed they were looking at a

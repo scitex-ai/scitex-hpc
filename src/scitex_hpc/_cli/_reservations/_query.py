@@ -6,23 +6,25 @@ import json as _json
 import sys
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand
 
-from ..._config import JobConfig
 from ..._reservation import Reservation
-
 from ._group import _serialize, lease
 
 
-@lease.command("list")
+@lease.command(
+    "list",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="List active reservations.",
+        examples=(
+            Example("{prog} lease list", "Table of active leases."),
+            Example("{prog} lease list --json", "Structured JSON output."),
+        ),
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
 def list_cmd(as_json):
-    """List active reservations.
-
-    \b
-    Example:
-      $ scitex-hpc lease list
-      $ scitex-hpc lease list --json
-    """
     rows = Reservation.list()
     if as_json:
         click.echo(_json.dumps([_serialize(r) for r in rows], indent=2))
@@ -38,19 +40,23 @@ def list_cmd(as_json):
         )
 
 
-@lease.command("get")
+@lease.command(
+    "get",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Show one reservation as JSON.",
+        description="Exits 2 if no lease of that NAME exists.",
+        examples=(
+            Example("{prog} lease get dev-pool", "Show one lease."),
+            Example("{prog} lease get dev-pool --json", "Same, explicit JSON."),
+        ),
+    ),
+)
 @click.argument("name")
 @click.option("--host", default=None)
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
 @click.pass_context
 def get_cmd(ctx, name, host, as_json):
-    """Show one reservation as JSON.
-
-    \b
-    Example:
-      $ scitex-hpc lease get dev-pool
-      $ scitex-hpc lease get dev-pool --json
-    """
     res = Reservation.get(name, host=host)
     if res is None:
         click.echo(f"(no reservation named {name!r})", err=True)

@@ -197,8 +197,31 @@ def runner_keepalive_fragment(
         # runner's TempDirectoryManager.InitializeTempDirectory fails at
         # startup ("_temp already exists") if it survives a restart.
         f'    rm -rf "$wd/_temp"\n'
+        # Per-runner global git config, re-seeded fresh each run.sh session.
+        #
+        # actions/checkout runs `git config --global --add safe.directory <p>`
+        # on EVERY job. The whole fleet shares one $HOME, and ~/.gitconfig is a
+        # SYMLINK into the operator's dotfiles SSoT, so those `--add` lines
+        # accumulate there without bound and sync to every host. Measured
+        # 2026-07-29: 35,327 safe.directory entries, only 206 unique (~171x
+        # duplication), in a 4.3 MB file that grew ~2.5 KB in one minute.
+        #
+        # `--add` is a read-modify-write of the WHOLE file under
+        # `.gitconfig.lock`, so lock hold time scales with file size and the
+        # failure COMPOUNDS: more runs -> bigger file -> longer hold -> more
+        # collisions. That is the 255-exit race, and why occasional flakes on
+        # 07-17 became ~28 repos red simultaneously on 07-23.
+        #
+        # Fixed HERE, at the launcher, rather than per-workflow: this is the
+        # one place $HOME is handed to every runner, so it also covers the
+        # ~58 per-repo callers that no workflow-level env var reaches.
+        # `include.path` keeps the operator's real identity (user.name/email)
+        # readable while writes land in the runner's own node-local file.
+        f'    printf "[include]\\npath = %s\\n" "$HOME/.gitconfig" '
+        f'> "$wd/.gitconfig"\n'
         f'    ( cd "$d" \\\n'
         f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
+        f'           GIT_CONFIG_GLOBAL="$wd/.gitconfig" \\\n'
         f'           PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
         f'           ./run.sh ) >> "{runner.log}" 2>&1\n'
         f'    rc=$?\n'

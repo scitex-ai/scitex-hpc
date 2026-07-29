@@ -19,6 +19,7 @@ import json as _json
 import sys
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand, SpecGroup
 
 from ..tunnel_supervisor import (
     PROFILES,
@@ -30,20 +31,45 @@ from ..tunnel_supervisor import (
 )
 
 
-@click.group("tunnel-supervisor")
+@click.group(
+    "tunnel-supervisor",
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary=(
+            "Generic per-node service/tunnel keepalive supervisor "
+            "(profile-driven)."
+        ),
+        description=(
+            "Sentinel + keep-alive loop, flock single-instance semantics, a "
+            "timestamped heartbeat log, and endpoint health-checking (not "
+            "just PID liveness) — generalized out of scitex-hpc's ci_runners "
+            "fleet supervisor so sibling projects can build their own "
+            "supervisors on this primitive instead of hand-rolling flock "
+            "scripts."
+        ),
+    ),
+)
 def tunnel_supervisor() -> None:
-    """Generic per-node service/tunnel keepalive supervisor (profile-driven).
-
-    \b
-    Sentinel + keep-alive loop, flock single-instance semantics, a
-    timestamped heartbeat log, and endpoint health-checking (not just
-    PID liveness) — generalized out of scitex-hpc's ci_runners fleet
-    supervisor so sibling projects can build their own supervisors on
-    top of this primitive instead of hand-rolling flock scripts.
-    """
+    pass
 
 
-@tunnel_supervisor.command("show")
+@tunnel_supervisor.command(
+    "show",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Print the rendered supervisor script for PROFILE.",
+        examples=(
+            Example(
+                "{prog} tunnel-supervisor show --profile clew-tunnel",
+                "Render one profile's supervisor script.",
+            ),
+            Example(
+                "{prog} tunnel-supervisor show --profile clew-tunnel --json",
+                "Same, wrapped as JSON.",
+            ),
+        ),
+    ),
+)
 @click.option(
     "--profile",
     default=None,
@@ -51,13 +77,6 @@ def tunnel_supervisor() -> None:
 )
 @click.option("--json", "as_json", is_flag=True, help='Emit JSON ({"script": ...}).')
 def show_cmd(profile: str | None, as_json: bool) -> None:
-    """Print the rendered supervisor script for PROFILE.
-
-    \b
-    Example:
-      $ scitex-hpc tunnel-supervisor show --profile clew-tunnel
-      $ scitex-hpc tunnel-supervisor show --profile clew-tunnel --json
-    """
     prof = get_profile(profile) if profile else get_profile()
     text = supervisor_text(prof)
     if as_json:
@@ -66,7 +85,26 @@ def show_cmd(profile: str | None, as_json: bool) -> None:
     click.echo(text, nl=False)
 
 
-@tunnel_supervisor.command("install")
+@tunnel_supervisor.command(
+    "install",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary=(
+            "Write the rendered supervisor script to TARGET_PATH (chmod +x)."
+        ),
+        description=(
+            "Default is DRY-RUN — prints the script that would be written. "
+            "Pass -y/--yes to actually write it."
+        ),
+        examples=(
+            Example(
+                "{prog} tunnel-supervisor install /opt/acme/tunnel.sh "
+                "--profile acme -y",
+                "Write the acme profile's supervisor to an explicit path.",
+            ),
+        ),
+    ),
+)
 @click.argument("target_path")
 @click.option(
     "--profile",
@@ -78,16 +116,6 @@ def show_cmd(profile: str | None, as_json: bool) -> None:
 def install_cmd(
     target_path: str, profile: str | None, dry_run: bool, yes: bool
 ) -> None:
-    """Write the rendered supervisor script to TARGET_PATH (chmod +x).
-
-    \b
-    Default is DRY-RUN (prints the script that would be written); pass
-    -y/--yes to actually write it.
-
-    \b
-    Example:
-      $ scitex-hpc tunnel-supervisor install /opt/acme/tunnel.sh --profile acme -y
-    """
     prof = get_profile(profile) if profile else get_profile()
     if not yes or dry_run:
         click.echo(

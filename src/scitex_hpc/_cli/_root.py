@@ -13,6 +13,7 @@ import sys
 from typing import Sequence
 
 import click
+from scitex_dev.ecosystem import CliHelp, SpecGroup
 
 from .. import __version__
 
@@ -33,8 +34,16 @@ COMMAND_CATEGORIES = [
 ]
 
 
-class CategorizedGroup(click.Group):
-    """Click.Group that groups commands into named sections in --help."""
+class CategorizedGroup(SpecGroup):
+    """Click group that sorts commands into named sections in ``--help``.
+
+    Derives from ``SpecGroup`` rather than ``click.Group`` so the root group
+    can carry a declarative ``help_spec`` (§4b) WITHOUT losing this class's
+    section layout: ``format_commands`` below still wins by MRO, so the
+    "Leases / CI runners / Login-node guard / ..." headings are unchanged.
+    Swapping the root to a bare ``cls=SpecGroup`` would have satisfied the
+    audit and silently flattened those sections into one list.
+    """
 
     def format_commands(self, ctx, formatter):
         commands = {}
@@ -99,6 +108,14 @@ def _show_recursive_help(ctx: click.Context) -> None:
     cls=CategorizedGroup,
     invoke_without_command=True,
     context_settings=CONTEXT_SETTINGS,
+    help_spec=CliHelp(
+        summary="Generic SLURM dispatch + persistent reservations.",
+        description=(
+            "Config is loaded with the SciTeX precedence chain: "
+            "config.yaml -> $SCITEX_HPC_CONFIG -> ~/.scitex/hpc/config.yaml "
+            "-> defaults."
+        ),
+    ),
 )
 @click.version_option(__version__, "-V", "--version", prog_name=PROG_NAME)
 @click.help_option("-h", "--help")
@@ -115,12 +132,6 @@ def _show_recursive_help(ctx: click.Context) -> None:
 )
 @click.pass_context
 def cli(ctx: click.Context, help_recursive: bool, as_json: bool) -> None:
-    """scitex-hpc - Generic SLURM dispatch + persistent reservations.
-
-    \b
-    Config is loaded with the SciTeX precedence chain:
-      config.yaml -> $SCITEX_HPC_CONFIG -> ~/.scitex/hpc/config.yaml -> defaults
-    """
     ctx.ensure_object(dict)
     ctx.obj["as_json"] = as_json
     if help_recursive:

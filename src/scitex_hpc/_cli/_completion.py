@@ -9,6 +9,7 @@ import os
 import subprocess
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand
 
 _SOURCE_MAP = {"bash": "bash_source", "zsh": "zsh_source", "fish": "fish_source"}
 
@@ -49,7 +50,23 @@ def _generate_script(shell: str, prog_name: str) -> str:
 def attach_shell_completion(main_group, *, prog_name: str) -> None:
     """Register the canonical 4 shell-completion leaves on ``main_group``."""
 
-    @main_group.command("print-shell-completion")
+    @main_group.command(
+        "print-shell-completion",
+        cls=SpecCommand,
+        help_spec=CliHelp(
+            summary="Print the click-generated completion script to stdout.",
+            examples=(
+                Example(
+                    "{prog} print-shell-completion --shell bash",
+                    "Print the bash completion script.",
+                ),
+                Example(
+                    'eval "$({prog} print-shell-completion --shell bash)"',
+                    "Activate completion in the current shell.",
+                ),
+            ),
+        ),
+    )
     @click.option(
         "--shell",
         type=click.Choice(["bash", "zsh", "fish"]),
@@ -57,16 +74,30 @@ def attach_shell_completion(main_group, *, prog_name: str) -> None:
         help="Target shell. Default: bash.",
     )
     def print_shell_completion(shell):
-        """Print the click-generated completion script to stdout.
-
-        \b
-        Example:
-          $ scitex-hpc print-shell-completion --shell bash
-          $ eval "$(scitex-hpc print-shell-completion --shell bash)"
-        """
         click.echo(_generate_script(shell, prog_name))
 
-    @main_group.command("install-shell-completion")
+    @main_group.command(
+        "install-shell-completion",
+        cls=SpecCommand,
+        help_spec=CliHelp(
+            summary="Wire up <TAB> completion in the user's shell rc.",
+            description=(
+                "Activate in the current shell after install with "
+                "`source ~/.bashrc` (or the rc for your shell)."
+            ),
+            examples=(
+                Example("{prog} install-shell-completion", "Writes to ~/.bashrc."),
+                Example(
+                    "{prog} install-shell-completion --shell zsh",
+                    "Writes to ~/.zshrc.",
+                ),
+                Example(
+                    "{prog} install-shell-completion --dry-run",
+                    "Preview the eval line and target rc without writing.",
+                ),
+            ),
+        ),
+    )
     @click.option(
         "--shell",
         type=click.Choice(["bash", "zsh", "fish"]),
@@ -80,18 +111,6 @@ def attach_shell_completion(main_group, *, prog_name: str) -> None:
     )
     @click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt.")
     def install_shell_completion(shell, dry_run, yes):
-        """Wire up ``<TAB>`` completion in the user's shell rc.
-
-        \b
-        Examples:
-          scitex-hpc install-shell-completion              # → ~/.bashrc
-          scitex-hpc install-shell-completion --shell zsh  # → ~/.zshrc
-          scitex-hpc install-shell-completion --dry-run    # preview only
-
-        \b
-        Activate in the current shell after install:
-          source ~/.bashrc
-        """
         del yes
         rc_path = _rc_path(shell, prog_name)
 

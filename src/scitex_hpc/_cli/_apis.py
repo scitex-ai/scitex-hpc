@@ -5,19 +5,24 @@ from __future__ import annotations
 import json as _json
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand
 
 
-@click.command("list-python-apis")
+@click.command(
+    "list-python-apis",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="List public Python API symbols of scitex_hpc.",
+        examples=(
+            Example("{prog} list-python-apis", "Names only."),
+            Example("{prog} list-python-apis -v", "Names with descriptions."),
+            Example("{prog} list-python-apis --json", "Structured JSON output."),
+        ),
+    ),
+)
 @click.option("-v", "--verbose", count=True, help="Verbosity (-v, -vv).")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def list_python_apis(verbose, as_json):
-    """List public Python API symbols of scitex_hpc.
-
-    \b
-    Example:
-      $ scitex-hpc list-python-apis
-      $ scitex-hpc list-python-apis --json
-    """
     apis = [
         ("JobConfig", "Cluster-agnostic SLURM job configuration."),
         ("Reservation", "Persistent SLURM allocation handle."),

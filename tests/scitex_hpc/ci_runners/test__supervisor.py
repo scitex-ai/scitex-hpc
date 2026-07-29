@@ -71,6 +71,50 @@ def test_fragment_path_includes_user_bin():
     assert "$HOME/.bin:" in frag
 
 
+def test_fragment_sets_per_runner_git_config_global():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — the whole fleet shares one $HOME and ~/.gitconfig is a symlink
+    # into the dotfiles SSoT, so checkout's `git config --global --add
+    # safe.directory` accumulated 35,327 entries (206 unique) in a 4.3 MB file
+    # by 2026-07-29. Each --add is a read-modify-write of the WHOLE file under
+    # .gitconfig.lock, so collisions COMPOUND as it grows.
+    assert 'GIT_CONFIG_GLOBAL="$wd/.gitconfig"' in frag
+
+
+def test_fragment_seeds_git_config_with_include_of_real_config():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — GIT_CONFIG_GLOBAL REPLACES the global config, so without an
+    # include the runner loses user.name/user.email and commits break.
+    assert '"[include]\\npath = %s\\n" "$HOME/.gitconfig"' in frag
+
+
+def test_fragment_writes_seeded_config_to_the_per_runner_path():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — the seed must land on the runner's own node-local file, which is
+    # what gives each runner its own .gitconfig.lock instead of one shared lock.
+    assert '> "$wd/.gitconfig"' in frag
+
+
+def test_fragment_seeds_git_config_before_launching_run_sh():
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert — seeding must happen INSIDE the restart loop and before run.sh,
+    # otherwise a restarted runner inherits the previous session's accumulated
+    # safe.directory entries and the growth resumes per-runner.
+    assert frag.index('> "$wd/.gitconfig"') < frag.index("./run.sh")
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")

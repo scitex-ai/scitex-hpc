@@ -21,6 +21,7 @@ import pytest
 # ===== AUTO-GENERATED: cross-package imports =====
 CROSS_PACKAGE_IMPORTS = [
     "scitex_config._ecosystem",
+    "scitex_dev.ecosystem",
     "scitex_dev.jobs",
     "scitex_ssh",
 ]

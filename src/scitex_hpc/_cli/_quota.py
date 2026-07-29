@@ -16,6 +16,7 @@ import json as _json
 import sys
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand, SpecGroup
 
 from .._quota import (
     DEFAULT_PATHS,
@@ -25,17 +26,44 @@ from .._quota import (
 )
 
 
-@click.group("quota")
+@click.group(
+    "quota",
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary="Filesystem inode-quota early warning (df -i based).",
+        description=(
+            "Guardrail for the GPFS inode-quota wall: alarm at 90% so a "
+            "fileset is never silently exhausted — the failure mode that "
+            "breaks SAC state-dbs."
+        ),
+    ),
+)
 def quota() -> None:
-    """Filesystem inode-quota early warning (df -i based).
-
-    \b
-    Guardrail for the GPFS inode-quota wall: alarm at 90% so a fileset is
-    never silently exhausted (the failure mode that breaks SAC state-dbs).
-    """
+    pass
 
 
-@quota.command("check")
+@quota.command(
+    "check",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary=(
+            "Report inode-quota usage; alarm and exit 1 if any fileset is "
+            "over threshold."
+        ),
+        description=(
+            "Exit codes: 0 = all filesets under threshold, 1 = one or more "
+            "at/over it (alarm fired via $SCITEX_CI_ALARM_CMD)."
+        ),
+        examples=(
+            Example("{prog} quota check", "Check the default punim0264 fileset."),
+            Example(
+                "{prog} quota check --path /data/gpfs/projects/punim0264 "
+                "--threshold 90 --json",
+                "Check one fileset at an explicit threshold, as JSON.",
+            ),
+        ),
+    ),
+)
 @click.option("--host", default="spartan", help="SSH host (default: spartan).")
 @click.option(
     "--path",
@@ -52,18 +80,6 @@ def quota() -> None:
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit the report as JSON.")
 def check_cmd(host, paths, threshold_pct, as_json):
-    """Report inode-quota usage; alarm + exit 1 if any fileset is over threshold.
-
-    \b
-    Exit codes: 0 = all under threshold, 1 = one or more filesets at/over it
-    (alarm fired via $SCITEX_CI_ALARM_CMD).
-
-    \b
-    Example:
-      $ scitex-hpc quota check
-      $ scitex-hpc quota check --path /data/gpfs/projects/punim0264 \\
-          --threshold 90 --json
-    """
     report = check_inode_quota(
         host, tuple(paths) or DEFAULT_PATHS, threshold_pct=threshold_pct
     )

@@ -12,8 +12,14 @@ branches MUST NOT set this — drift goes silent.
 """
 
 import shutil
+from pathlib import Path
 
 import pytest
+
+# Repo root. This file is tests/develop/test_audit.py, so parents[2] is the
+# checkout — NOT parents[1] as in the helper's docstring example, which is
+# written for a test living directly in tests/.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.skipif(
@@ -24,8 +30,20 @@ def test_audit_all_clean():
     # Arrange
     from scitex_dev.testing import audit_all_for_package
 
-    # Act
-    result = audit_all_for_package('scitex-hpc')
+    # Act — `path` is REQUIRED in practice even though it defaults to None.
+    # Without it, audit-all has no argument saying WHICH tree was meant and
+    # falls back to resolving by import location or a ~/proj/<name> guess. On
+    # these runners there is no container and no per-job isolation, so "the
+    # cwd" is not a stable thing: the guess lands on a stale checkout, another
+    # job's tree, or the wrong commit of this one, and the gate then grades
+    # source that is not under test while reporting a confident pass/fail.
+    #
+    # Measured 2026-07-29: identical scitex-dev 0.38.1 gave `via cwd` and
+    # opposite verdicts on the same repo 16 minutes apart, and CI passed on
+    # develop while the same commit failed locally. Anchoring on this file —
+    # which is inside the checkout pytest is running against by construction —
+    # makes the header read `via explicit` and the subject deterministic.
+    result = audit_all_for_package('scitex-hpc', path=_REPO_ROOT)
 
     # Assert — audit_all_for_package returns None on a clean
     # audit and raises AssertionError on any unexpected finding,

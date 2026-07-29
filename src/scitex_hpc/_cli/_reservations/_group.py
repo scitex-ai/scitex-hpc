@@ -12,12 +12,9 @@ assert object IDENTITY between the alias's commands and lease's.
 
 from __future__ import annotations
 
-import json as _json
-import sys
-
 import click
+from scitex_dev.ecosystem import CliHelp, SpecGroup
 
-from ..._config import JobConfig
 from ..._reservation import Reservation
 
 
@@ -34,14 +31,19 @@ def _serialize(res: Reservation) -> dict:
     }
 
 
-@click.group("lease")
+@click.group(
+    "lease",
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary="Persistent SLURM allocations (book once, exec many).",
+        description=(
+            "The legacy `reservations` command is a deprecated alias for "
+            "`lease` and forwards to these same subcommands."
+        ),
+    ),
+)
 def lease() -> None:
-    """Persistent SLURM allocations (book once, exec many).
-
-    \b
-    Note: the legacy ``reservations`` command is a deprecated alias for
-    ``lease`` and forwards to these same subcommands.
-    """
+    pass
 
 
 _DEPRECATION_NOTICE = (

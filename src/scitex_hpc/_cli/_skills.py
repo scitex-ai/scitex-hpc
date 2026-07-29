@@ -10,6 +10,7 @@ import os as _os
 from pathlib import Path
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand, SpecGroup
 
 PKG = "scitex-hpc"
 
@@ -28,32 +29,45 @@ def _list_skill_files(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*.md") if p.is_file() and p.name != "SKILL.md")
 
 
-@click.group(name="skills", invoke_without_command=True)
+@click.group(
+    name="skills",
+    invoke_without_command=True,
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary="Agent-facing skills bundled with scitex-hpc.",
+        examples=(
+            Example("{prog} skills list", "List the bundled skill files."),
+            Example("{prog} skills get 01_installation", "Print one skill."),
+            Example(
+                "{prog} skills install",
+                "Install into ~/.scitex/dev/skills/scitex-hpc/.",
+            ),
+            Example(
+                "{prog} skills install --claude-symlink",
+                "Also expose them to ~/.claude/skills/scitex/.",
+            ),
+        ),
+    ),
+)
 @click.pass_context
 def skills_group(ctx) -> None:
-    """Agent-facing skills bundled with scitex-hpc.
-
-    \b
-    Examples:
-      $ scitex-hpc skills list
-      $ scitex-hpc skills get 01_installation
-      $ scitex-hpc skills install                  # → ~/.scitex/dev/skills/scitex-hpc/
-      $ scitex-hpc skills install --claude-symlink # also expose to ~/.claude/skills/scitex/
-    """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
 
-@skills_group.command(name="list")
+@skills_group.command(
+    name="list",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="List skill files bundled with this package.",
+        examples=(
+            Example("{prog} skills list", "Human-readable listing."),
+            Example("{prog} skills list --json", "Structured JSON output."),
+        ),
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 def skills_list(as_json: bool) -> None:
-    """List skill files bundled with this package.
-
-    \b
-    Example:
-      $ scitex-hpc skills list
-      $ scitex-hpc skills list --json
-    """
     root = _skills_root()
     files = _list_skill_files(root)
     if as_json:
@@ -69,17 +83,21 @@ def skills_list(as_json: bool) -> None:
         click.echo(f"{p.stem:36s}  {rel}")
 
 
-@skills_group.command(name="get")
+@skills_group.command(
+    name="get",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Print the contents of a skill file by NAME.",
+        description="NAME is the file stem, e.g. `01_installation`.",
+        examples=(
+            Example("{prog} skills get 01_installation", "Print one skill."),
+            Example("{prog} skills get 02_quick-start --json", "As JSON."),
+        ),
+    ),
+)
 @click.argument("name")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 def skills_get(name: str, as_json: bool) -> None:
-    """Print the contents of a skill file by NAME (e.g. ``01_installation``).
-
-    \b
-    Example:
-      $ scitex-hpc skills get 01_installation
-      $ scitex-hpc skills get 02_quick-start --json
-    """
     root = _skills_root()
     target = name[:-3] if name.endswith(".md") else name
     match = next((p for p in _list_skill_files(root) if p.stem == target), None)
@@ -103,7 +121,27 @@ def skills_get(name: str, as_json: bool) -> None:
     click.echo(match.read_text(encoding="utf-8"))
 
 
-@skills_group.command(name="install")
+@skills_group.command(
+    name="install",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Install this package's skills into a target directory.",
+        examples=(
+            Example(
+                "{prog} skills install",
+                "Symlink into ~/.scitex/dev/skills/scitex-hpc/.",
+            ),
+            Example(
+                "{prog} skills install --claude-symlink",
+                "Also expose at ~/.claude/skills/scitex/.",
+            ),
+            Example(
+                "{prog} skills install --no-link --dest /tmp/scitex-hpc-skills",
+                "Copy rather than symlink, to an explicit destination.",
+            ),
+        ),
+    ),
+)
 @click.option(
     "--dest",
     type=click.Path(),
@@ -130,14 +168,6 @@ def skills_install(
     dry_run: bool,
     yes: bool,
 ) -> None:
-    """Install this package's skills into a target directory.
-
-    \b
-    Example:
-      $ scitex-hpc skills install
-      $ scitex-hpc skills install --claude-symlink
-      $ scitex-hpc skills install --no-link --dest /tmp/scitex-hpc-skills
-    """
     del yes
     src = _skills_root().resolve()
     if not src.is_dir():

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json as _json
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand, SpecGroup
 
 from .._config import JobConfig
 from .._walltime import WalltimeMax, walltime_max
@@ -31,12 +32,44 @@ def _serialize(result: WalltimeMax) -> dict:
     }
 
 
-@click.group("walltime")
+@click.group(
+    "walltime",
+    cls=SpecGroup,
+    help_spec=CliHelp(
+        summary="Empirically-verified SLURM walltime limits (not sinfo alone).",
+    ),
+)
 def walltime() -> None:
-    """Empirically-verified SLURM walltime limits (not sinfo alone)."""
+    pass
 
 
-@walltime.command("show")
+@walltime.command(
+    "show",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary=(
+            "Report the empirically achievable walltime ceiling for PARTITION."
+        ),
+        description=(
+            "sinfo's MaxTime is a partition CEILING, not a guarantee — the "
+            "real limit is the tightest of the partition ceiling, the QOS's "
+            "MaxWall, and your account association's MaxWall, none of which "
+            "sinfo alone reveals. This command checks all three, and with "
+            "--verify submits a real (non-queuing) sbatch --test-only probe "
+            "as the decisive check."
+        ),
+        examples=(
+            Example(
+                "{prog} walltime show sapphire --verify",
+                "Decisively confirm sapphire's achievable ceiling.",
+            ),
+            Example(
+                "{prog} walltime show gpu-h100 --json",
+                "Report gpu-h100's readings as JSON.",
+            ),
+        ),
+    ),
+)
 @click.argument("partition")
 @click.option(
     "--host",
@@ -59,20 +92,6 @@ def walltime() -> None:
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
 def walltime_show_cmd(partition, host, account, qos, verify, as_json):
-    """Report the empirically achievable walltime ceiling for PARTITION.
-
-    \b
-    sinfo's MaxTime is a partition CEILING, not a guarantee — the real
-    limit is the tightest of the partition ceiling, the QOS's MaxWall,
-    and your account association's MaxWall, none of which sinfo alone
-    reveals. This command checks all three, and with --verify submits a
-    real (non-queuing) sbatch --test-only probe as the decisive check.
-
-    \b
-    Example:
-      $ scitex-hpc walltime show sapphire --verify
-      $ scitex-hpc walltime show gpu-h100 --json
-    """
     config = JobConfig(project="", host=host, account=account, qos=qos)
     result = walltime_max(config, partition, verify=verify)
 

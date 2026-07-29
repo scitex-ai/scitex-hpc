@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import contextlib
 
-from scitex_hpc._cli import _ci_runners as cli_mod
 from scitex_hpc._cli import main
+from scitex_hpc._cli._ci_runners import _group as cli_mod
 from scitex_hpc.ci_runners import FleetSpec, RunnerSpec
 
 CI_BASE = "/data/gpfs/projects/punim0264/ywatanabe/ci"
@@ -27,7 +27,15 @@ def _fleet(*names: str) -> FleetSpec:
 
 @contextlib.contextmanager
 def _fake_discover(fleet: FleetSpec):
-    """Swap module-level ``_discover`` for one returning ``fleet`` (no SSH)."""
+    """Swap module-level ``_discover`` for one returning ``fleet`` (no SSH).
+
+    Patches ``_ci_runners._group`` — where ``_discover`` is DEFINED — and the
+    command modules call it as ``_group._discover(...)`` rather than binding it
+    at import. Both halves are required: when this package was split out of a
+    single module, a from-import in the command modules would have captured the
+    real function and left this patch silently inert. The tests would still
+    have PASSED, guarding nothing.
+    """
     # Arrange — real attribute mutation, restored on exit.
     prior = cli_mod._discover
     cli_mod._discover = lambda host, ci_base, exclude: fleet

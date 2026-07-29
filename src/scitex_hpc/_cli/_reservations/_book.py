@@ -6,6 +6,7 @@ import json as _json
 import sys
 
 import click
+from scitex_dev.ecosystem import CliHelp, Example, SpecCommand
 
 from ..._config import JobConfig
 from ..._reservation import Reservation
@@ -13,7 +14,62 @@ from ..._reservation import Reservation
 from ._group import _serialize, lease
 
 
-@lease.command("book")
+@lease.command(
+    "book",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary="Submit a hold-job and wait for SLURM allocation.",
+        description=(
+            "NAMING CONVENTION for NAME — encodes the shape so any operator "
+            "can read an allocation without re-discovering it:\n"
+            "  CPU-only : <cluster>-cpu-<cores>-cores-<ram_gb>-ram\n"
+            "             e.g. spartan-cpu-64-cores-256-ram\n"
+            "  GPU      : <cluster>-gpu-<cores>-cores-<ram_gb>-ram"
+            "-<vram_gb>-vram-<gputype>\n"
+            "             e.g. spartan-gpu-16-cores-128-ram-80-vram-h100\n"
+            "Suffix the GPU type so similar-shape allocations on different "
+            "GPU classes cannot collide; for multiple GPUs use -NxTYPE "
+            "(e.g. ...-80-vram-4xh100). Always embed the cluster prefix so "
+            "multi-cluster operators do not collide on one lease id.\n\n"
+            "SPARTAN GOTCHAS (learned the hard way):\n"
+            "  * --gpus is CASE-SENSITIVE on Spartan: use UPPERCASE H100:1 / "
+            "A100:1. Lowercase fails with 'Requested node configuration is "
+            "not available'.\n"
+            "  * Per-GPU caps on shared nodes: gpu-a100 (32 cores/512GB/4 "
+            "A100) allows max 8 cores + 128GB per A100; gpu-h100 (64 "
+            "cores/1TB/4 H100) allows max 16 cores + ~256GB per H100. "
+            "Asking above these for a 1-GPU job is rejected.\n"
+            "  * QOS by partition (account=punim2354): cascade/sapphire -> "
+            "publiccpu, gpu-a100 -> publicgpu, gpu-h100 -> feit."
+        ),
+        examples=(
+            Example(
+                "{prog} lease book spartan-cpu-64-cores-256-ram "
+                "--partition cascade --cpus 64 --mem 256G --time 7-0 "
+                "--account punim2354 --qos publiccpu --persistent",
+                "VERIFIED on Spartan — CPU, cascade (64 cores/256GB/7d).",
+            ),
+            Example(
+                "{prog} lease book spartan-cpu-64-cores-128-ram "
+                "--partition sapphire --cpus 64 --mem 128G --time 7-0 "
+                "--account punim2354 --qos publiccpu --persistent",
+                "VERIFIED — CPU, sapphire (64 cores/128GB/7d).",
+            ),
+            Example(
+                "{prog} lease book spartan-gpu-16-cores-128-ram-80-vram-h100 "
+                "--partition gpu-h100 --cpus 16 --mem 128G --gpus H100:1 "
+                "--time 7-0 --account punim2354 --qos feit --persistent",
+                "VERIFIED — 1x H100 (16 cores/128GB/7d).",
+            ),
+            Example(
+                "{prog} lease book spartan-gpu-8-cores-128-ram-80-vram-a100 "
+                "--partition gpu-a100 --cpus 8 --mem 128G --gpus A100:1 "
+                "--time 7-0 --account punim2354 --qos publicgpu --persistent",
+                "VERIFIED — 1x A100 (8 cores/128GB/7d).",
+            ),
+        ),
+    ),
+)
 @click.argument("name")
 @click.option(
     "--host",
@@ -100,68 +156,6 @@ def book_cmd(
     yes,
     as_json,
 ):
-    """Submit a hold-job and wait for SLURM allocation.
-
-    \b
-    Naming convention (use this for NAME — encodes the shape so any
-    operator can read it without re-discovering the allocation):
-      CPU-only : <cluster>-cpu-<cores>-cores-<ram_gb>-ram
-                  e.g. spartan-cpu-64-cores-256-ram
-      GPU      : <cluster>-gpu-<cores>-cores-<ram_gb>-ram-<vram_gb>-vram-<gputype>
-                  e.g. spartan-gpu-16-cores-128-ram-80-vram-h100
-                       spartan-gpu-8-cores-128-ram-80-vram-a100
-    Suffix the GPU type at the end so similar-shape allocations on
-    different GPU classes don't collide (always include it for GPU
-    reservations). For multiple GPUs, use `-NxTYPE` (e.g.
-    `...-80-vram-4xh100`). Always embed the cluster prefix so multi-
-    cluster operators don't collide on the same lease id.
-
-    Verified-working examples on Spartan (account=punim2354):
-
-    \b
-      # CPU — cascade partition (64 cores / 256 GB / 7 days)
-      $ scitex-hpc lease book spartan-cpu-64-cores-256-ram \\
-          --partition cascade \\
-          --cpus 64 --mem 256G --time 7-0 \\
-          --account punim2354 --qos publiccpu --persistent
-
-    \b
-      # CPU — sapphire partition (64 cores / 128 GB / 7 days)
-      $ scitex-hpc lease book spartan-cpu-64-cores-128-ram \\
-          --partition sapphire \\
-          --cpus 64 --mem 128G --time 7-0 \\
-          --account punim2354 --qos publiccpu --persistent
-
-    \b
-      # GPU — 1× H100 (16 cores / 128 GB / 7 days)
-      $ scitex-hpc lease book spartan-gpu-16-cores-128-ram-80-vram-h100 \\
-          --partition gpu-h100 \\
-          --cpus 16 --mem 128G --gpus H100:1 --time 7-0 \\
-          --account punim2354 --qos feit --persistent
-
-    \b
-      # GPU — 1× A100 (8 cores / 128 GB / 7 days)
-      $ scitex-hpc lease book spartan-gpu-8-cores-128-ram-80-vram-a100 \\
-          --partition gpu-a100 \\
-          --cpus 8 --mem 128G --gpus A100:1 --time 7-0 \\
-          --account punim2354 --qos publicgpu --persistent
-
-    \b
-    Spartan gotchas (learned the hard way):
-      * --gpus value is case-sensitive on Spartan: use UPPERCASE
-        `H100:1`, `A100:1` — lowercase fails with
-        "Requested node configuration is not available".
-      * Per-GPU caps on shared nodes:
-          - gpu-a100 nodes: 32 cores / 512 GB / 4 A100  → max 8 cores
-            and 128 GB per A100.
-          - gpu-h100 nodes: 64 cores / 1 TB  / 4 H100   → max 16 cores
-            and ~256 GB per H100.
-        Asking above these caps for a 1-GPU job is rejected.
-      * QOS by partition (account=punim2354):
-          - cascade / sapphire (CPU)  → --qos publiccpu
-          - gpu-a100                  → --qos publicgpu
-          - gpu-h100                  → --qos feit
-    """
     del yes
     cfg = JobConfig(
         project=name,
@@ -209,7 +203,41 @@ def book_cmd(
         click.echo(f"booked: id={res.id} job={res.job_id} node={res.node}")
 
 
-@lease.command("adopt")
+@lease.command(
+    "adopt",
+    cls=SpecCommand,
+    help_spec=CliHelp(
+        summary=(
+            "Register an EXISTING running SLURM job as a reservation "
+            "(no sbatch)."
+        ),
+        description=(
+            "Writes the SAME lease state `book` writes, but adopts a job "
+            "already running instead of submitting a new one — use it to "
+            "bring an ad-hoc or externally-submitted hold-job under "
+            "reservation management WITHOUT requesting a new node. "
+            "Afterwards `lease get NAME` and `lease refresh NAME` work "
+            "normally; refresh re-discovers the job_id by NAME via squeue, "
+            "so it survives a future re-key or resubmit.\n\n"
+            "--persistent only MARKS the lease persistent. It does NOT (and "
+            "cannot) add a SIGUSR1 walltime auto-resubmit trap to an "
+            "already-running ad-hoc job — that trap is installed only by "
+            "`book --persistent` at sbatch time. At walltime the adopted job "
+            "ends and one fresh node must be re-booked.\n\n"
+            "Refuses to overwrite an existing lease of the same id; cancel "
+            "it first if you mean to re-adopt a different job under that "
+            "name."
+        ),
+        examples=(
+            Example(
+                "{prog} lease adopt spartan-ci-runner-permanent "
+                "--job-id 26332626 --host spartan --persistent",
+                "Adopt the long-running CI lease so it is refresh-tracked "
+                "rather than re-booked.",
+            ),
+        ),
+    ),
+)
 @click.argument("name")
 @click.option(
     "--job-id",
@@ -248,32 +276,6 @@ def book_cmd(
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
 @click.pass_context
 def adopt_cmd(ctx, name, job_id, host, persistent, no_refresh_node, as_json):
-    """Register an EXISTING running SLURM job as a reservation (no sbatch).
-
-    Writes the SAME lease state ``book`` writes — but adopts a job that is
-    already running instead of submitting a new one. Use this to bring an
-    ad-hoc / externally-submitted hold-job under reservation management
-    WITHOUT requesting a new node. After adopt, ``lease get NAME`` and
-    ``lease refresh NAME`` work normally; ``refresh`` re-discovers the
-    job_id by NAME via squeue (so it survives a future re-key / resubmit).
-
-    \b
-    --persistent only MARKS the lease persistent. It does NOT (and cannot)
-    add a SIGUSR1 walltime auto-resubmit trap to an already-running ad-hoc
-    job — that trap is installed only by ``book --persistent`` at sbatch
-    time. At walltime the adopted job ends; the solver then re-books one
-    fresh node (the single unavoidable future allocation).
-
-    \b
-    Refuses to overwrite an existing lease of the same id — cancel it first
-    if you mean to re-adopt a different job under the same name.
-
-    \b
-    Example — adopt the long-running CI lease so the solver refresh-tracks
-    it instead of booking a new node:
-      $ scitex-hpc lease adopt spartan-ci-runner-permanent \\
-          --job-id 26332626 --host spartan --persistent
-    """
     # Resolve host via the same cascade as ``book`` (direct → $SCITEX_HPC_HOST
     # → user config) so ``--host`` stays optional for single-cluster operators.
     resolved_host = JobConfig(project=name, host=host).resolve("host")

@@ -161,7 +161,7 @@ disposable overlay per job removes the "N places" entirely.
 > zero `apptainer|singularity|.sif|overlay` hits (positive control passed) and
 > runs `./run.sh` bare on the node under a fleet-shared `$HOME`. Three agents
 > read this as implementation and reached wrong conclusions.
-> See `16_verifying-a-fix-is-live.md`.
+> See `17_verifying-a-fix-is-live.md`.
 
 ## Detection rule: zero failing steps means a lost runner, not a flaky test
 

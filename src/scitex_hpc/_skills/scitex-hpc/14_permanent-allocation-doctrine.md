@@ -157,6 +157,12 @@ broke that repo's releases for hours, because nothing ever discarded its
 mutable state is N places for it to rot; a shared base image + a
 disposable overlay per job removes the "N places" entirely.
 
+> **⚠ TARGET DESIGN, NOT DEPLOYED.** Measured 2026-07-29: `ci_runners/` has
+> zero `apptainer|singularity|.sif|overlay` hits (positive control passed) and
+> runs `./run.sh` bare on the node under a fleet-shared `$HOME`. Three agents
+> read this as implementation and reached wrong conclusions.
+> See `17_verifying-a-fix-is-live.md`.
+
 ## Detection rule: zero failing steps means a lost runner, not a flaky test
 
 A CI run that reports **failed with zero failing steps** is not a test

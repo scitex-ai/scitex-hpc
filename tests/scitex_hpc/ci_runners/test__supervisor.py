@@ -115,6 +115,44 @@ def test_fragment_seeds_git_config_before_launching_run_sh():
     assert frag.index('> "$wd/.gitconfig"') < frag.index("./run.sh")
 
 
+def test_fragment_sets_per_runner_tool_cache():
+    """`$cache/uv/` was written by JOBS, racing on one shared path.
+
+    The supervisor provisions only Python, once, before any runner exists --
+    so the module's "shared + read-only across all runners" invariant has
+    never covered uv. setup-uv writes it at job runtime, and uv shipped 12
+    releases in ~5 weeks, so each new version misses the cache and the first
+    jobs to want it install concurrently into the same file (exit 127 on
+    07-23 and again on 07-29).
+    """
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert 'RUNNER_TOOL_CACHE="$wd/toolcache"' in frag
+
+
+def test_fragment_keeps_the_python_toolcache_shared_by_symlink():
+    # Arrange — 3 interpreters x 80 runners is pure duplication against an
+    # inode quota already at ~93%, and nothing writes Python at job time.
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert 'ln -sfn "$HOME/tc/Python" "$wd/toolcache/Python"' in frag
+
+
+def test_fragment_tool_cache_is_set_for_the_run_sh_invocation():
+    # Arrange — setting it anywhere but the run.sh env would leave the
+    # runner's own child processes reading the shared cache.
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert frag.index('RUNNER_TOOL_CACHE="$wd/toolcache"') < frag.index("./run.sh")
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")

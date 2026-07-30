@@ -219,9 +219,38 @@ def runner_keepalive_fragment(
         # readable while writes land in the runner's own node-local file.
         f'    printf "[include]\\npath = %s\\n" "$HOME/.gitconfig" '
         f'> "$wd/.gitconfig"\n'
+        # Per-runner TOOL CACHE, with the Python subtree still SHARED.
+        #
+        # The supervisor provisions Python ONCE at start, before any runner
+        # exists, and the module docstring calls the cache "shared +
+        # read-only across all runners". That invariant holds for Python and
+        # has NEVER held for uv: `_provision_toolcache` only lays down
+        # Python, so `$cache/uv/` is written entirely by `setup-uv`, from
+        # jobs, at job runtime -- the exact concurrent write the invariant
+        # says cannot happen.
+        #
+        # Measured 2026-07-29/30: uv shipped 12 releases in ~5 weeks
+        # (0.11.23 -> 0.12.0). Each new version misses the shared cache, so
+        # the first jobs to request it all install into the same path at
+        # once and die `exit 127` on a binary another job is mid-write:
+        #   07-23  uv 0.11.31 missing -> 2 legs dead -> appeared 17 min later
+        #   07-29  uv 0.12.0  missing -> develop reddened
+        # It presents as an intermittent, PR-specific flake and is neither;
+        # a re-run is a coin flip that wins once someone else finishes.
+        #
+        # Python stays shared via symlink: 3 interpreters x 80 runners would
+        # be pure duplication against an inode quota already at ~93%, and
+        # nothing writes Python at job time. Everything setup-* DOES write
+        # lands in the runner's own dir, so there is no shared write path
+        # left to race on.
+        f'    mkdir -p "$wd/toolcache"\n'
+        f'    [ -e "$wd/toolcache/Python" ] || '
+        f'ln -sfn "{toolcache}/Python" "$wd/toolcache/Python"\n'
         f'    ( cd "$d" \\\n'
         f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
         f'           GIT_CONFIG_GLOBAL="$wd/.gitconfig" \\\n'
+        f'           RUNNER_TOOL_CACHE="$wd/toolcache" \\\n'
+        f'           AGENT_TOOLSDIRECTORY="$wd/toolcache" \\\n'
         f'           PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
         f'           ./run.sh ) >> "{runner.log}" 2>&1\n'
         f'    rc=$?\n'

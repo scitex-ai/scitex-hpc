@@ -246,11 +246,28 @@ def runner_keepalive_fragment(
         f'    mkdir -p "$wd/toolcache"\n'
         f'    [ -e "$wd/toolcache/Python" ] || '
         f'ln -sfn "{toolcache}/Python" "$wd/toolcache/Python"\n'
+        # Per-runner gh config dir — the THIRD face of the shared-$HOME class.
+        #
+        # `gh` parses ~/.config/gh/config.yml at STARTUP, before it looks at
+        # any token. The operator's copy is corrupt, so `gh` aborts before
+        # authentication and no secret can rescue it: scitex-logging's PR #24
+        # has been blocked on exactly this since 2026-07-12, and the same
+        # class was fixed repo-by-repo (scitex-ui#68, scitex-math#5) instead
+        # of here, where $HOME is actually handed to every runner.
+        #
+        # Deliberately NOT seeded from the real config. The other two faces
+        # seed (GIT_CONFIG_GLOBAL uses include.path so identity resolves) —
+        # copying here would import the corruption that IS the bug. CI auth
+        # comes from GH_TOKEN in Actions secrets, which `gh` reads from the
+        # environment and which needs no config file; an empty dir lets gh
+        # write its own defaults on first use.
+        f'    mkdir -p "$wd/gh"\n'
         f'    ( cd "$d" \\\n'
         f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
         f'           GIT_CONFIG_GLOBAL="$wd/.gitconfig" \\\n'
         f'           RUNNER_TOOL_CACHE="$wd/toolcache" \\\n'
         f'           AGENT_TOOLSDIRECTORY="$wd/toolcache" \\\n'
+        f'           GH_CONFIG_DIR="$wd/gh" \\\n'
         f'           PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
         f'           ./run.sh ) >> "{runner.log}" 2>&1\n'
         f'    rc=$?\n'

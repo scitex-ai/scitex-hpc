@@ -153,6 +153,48 @@ def test_fragment_tool_cache_is_set_for_the_run_sh_invocation():
     assert frag.index('RUNNER_TOOL_CACHE="$wd/toolcache"') < frag.index("./run.sh")
 
 
+def test_fragment_sets_per_runner_gh_config_dir():
+    """Third face of the shared-$HOME class, and the last one still live.
+
+    `gh` parses ~/.config/gh/config.yml at STARTUP, before it consults any
+    token, so the operator's corrupt copy aborts it before authentication —
+    no secret can rescue that. It has blocked scitex-logging PR #24 since
+    2026-07-12 while the same class was patched repo-by-repo (scitex-ui#68,
+    scitex-math#5) rather than at the launcher.
+    """
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert 'GH_CONFIG_DIR="$wd/gh"' in frag
+
+
+def test_fragment_does_not_seed_gh_config_from_the_shared_one():
+    """FORWARD guard only — it does NOT verify the GH_CONFIG_DIR change.
+
+    Checked against the unfixed generator and it PASSES there too, because
+    that generator never mentioned the shared gh config either. So this
+    asserts nothing about the current diff; keeping it anyway, correctly
+    labelled, because it pins a DECISION that a later change could quietly
+    undo.
+
+    The decision: unlike GIT_CONFIG_GLOBAL (seeded via ``include.path`` so
+    user.name/user.email still resolve), the gh config dir is deliberately
+    left EMPTY. Seeding it would copy in the corrupt config that IS the
+    defect -- gh parses config.yml at startup, before any token, and aborts.
+    CI auth comes from GH_TOKEN in Actions secrets, which needs no file. A
+    future "make it consistent with the git one" edit would look like a
+    tidy-up and would restore the bug; this fails if that happens.
+    """
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert "$HOME/.config/gh" not in frag
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")

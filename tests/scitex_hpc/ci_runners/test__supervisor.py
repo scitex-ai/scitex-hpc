@@ -151,13 +151,51 @@ def test_body_includes_every_runner():
     assert body.count("./run.sh") == 3
 
 
-def test_body_ends_with_wait():
+def test_body_blocks_as_the_jobs_main_process():
+    """Was ``test_body_ends_with_wait``, which asserted the DEFECT.
+
+    The intent was right -- the supervisor must block as the job's main process
+    -- but pinning it to a body ENDING in ``wait`` encoded the bug as the
+    contract: a bare ``wait`` returns when the SIGUSR1 resubmit trap fires, so
+    the job exits ~1h early and the successor queues with no runner online
+    (16h03m dark on hop 27331011; 27709706 never backfilled). Anyone fixing the
+    defect saw a red suite and could reasonably conclude they had broken
+    something. Re-pointed at the property actually wanted -- blocking that
+    SURVIVES the trap -- rather than the shape that used to implement it.
+    """
     # Arrange
     fleet = _fleet("a")
     # Act
     body = build_supervisor_hold_body(fleet)
-    # Assert — the supervisor blocks on wait as the job's main process
-    assert body.rstrip().endswith("wait")
+    # Assert
+    assert "wait || true" in body
+
+
+def test_body_never_ends_on_a_bare_wait():
+    """Regression guard for the ~1h early surrender. See the test above."""
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert
+    assert [ln for ln in body.splitlines() if ln.strip() == "wait"] == []
+
+
+def test_body_ends_on_the_closed_wait_loop_not_a_fallthrough():
+    """Asserted on the LAST line, not on the presence of the sentinel loop.
+
+    Every per-runner keep-alive fragment already contains
+    ``while [ -f <sentinel> ]``, so a substring check for it PASSES against the
+    unfixed body and guards nothing -- verified by running it against the old
+    code. This keys on the one thing the defect changes: where control flow
+    ends.
+    """
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert
+    assert body.rstrip().splitlines()[-1] == "done"
 
 
 def test_body_scrubs_easybuild_env():

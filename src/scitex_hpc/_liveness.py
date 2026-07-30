@@ -1,0 +1,440 @@
+"""SLURM job-liveness instrument — the authoritative *dead* signal.
+
+Once a SLURM allocation is gone, ``pam_slurm_adopt`` refuses login->compute
+ssh, so a tmux/ssh probe against the compute node can only ever answer
+UNKNOWN. SLURM itself, queried from the login node, is the only tool that
+can positively say a job is over. ``sac db reconcile-remote`` consumes this
+as ``INSTRUMENT_SLURM_JOB`` when deciding whether a stale remote agent row
+may be tombstoned.
+
+**A false DEAD tombstones a LIVE agent's row.** That is the failure mode
+this module exists to prevent, and it drives every decision below.
+
+The trap this module deliberately does NOT reuse
+------------------------------------------------
+
+``_reservation.py``'s ``_squeue_state()`` / ``refresh()`` run::
+
+    squeue --jobs=<id> --noheader --format='%T %N' 2>/dev/null
+
+Both swallow stderr *and* ignore the exit status, then hand empty stdout
+onward. "Job not in the queue" and "squeue failed / SLURM unreachable /
+module not loaded / ssh died" are therefore indistinguishable — each is an
+empty string. A thin wrapper over that helper would report DEAD on a query
+error, i.e. exactly the false DEAD forbidden here. Those helpers remain
+correct for their own callers (they poll a job they just submitted) and are
+left untouched; this module issues its **own** SLURM calls, never redirects
+stderr, and always inspects the exit status.
+
+Decision contract
+-----------------
+
+======== ====================================================================
+ALIVE    ``squeue`` exited 0 **and** the job is present with a state in
+         ``ACTIVE_STATES`` (RUNNING, PENDING, CONFIGURING, COMPLETING).
+DEAD     Requires POSITIVE evidence, reachable only when the queries
+         PROVABLY ran: ``squeue`` exited 0 with the job absent, **and**
+         ``sacct`` exited 0 and either reports a state in
+         ``TERMINAL_STATES``, or confirms the absence while a witness query
+         proves sacct is recording within the window.
+UNKNOWN  EVERYTHING else. Non-zero exit from either tool; stderr indicating
+         failure; ssh/transport failure; an exception; unparseable output; a
+         job-id outside the sacct retention window; sacct missing or not
+         permitted; a name matching MORE THAN ONE job (collision — never
+         "pick the first"); a recycled job-id whose name does not match.
+======== ====================================================================
+
+Two invariants, asserted by the test-suite:
+
+1. Absence is only evidence when the query PROVABLY ran. The default is
+   UNKNOWN; DEAD must be EARNED.
+2. No failure path — parse failure, unexpected token, transport error — may
+   ever produce DEAD.
+
+Every verdict carries a machine-readable ``reason`` and an ``evidence``
+mapping recording each probe, so a consumer can log *why* and tell "no"
+apart from "couldn't ask".
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Mapping
+
+from scitex_ssh import exec_remote
+
+from ._dispatch import _quote
+from ._liveness_probe import (
+    ACTIVE_STATES,
+    ALIVE,
+    DEAD,
+    DEFAULT_SACCT_WINDOW,
+    TERMINAL_STATES,
+    UNKNOWN,
+    Row,
+    base_job_id,
+    parse_pipe_rows,
+    run_probe,
+    squash,
+)
+
+__all__ = [
+    "ACTIVE_STATES",
+    "TERMINAL_STATES",
+    "ALIVE",
+    "DEAD",
+    "UNKNOWN",
+    "DEFAULT_SACCT_WINDOW",
+    "LivenessResult",
+    "job_liveness",
+]
+
+#: ``--allocations`` (-X) restricts sacct to allocation rows, dropping the
+#: per-step ``<id>.batch`` / ``.extern`` / ``.0`` children. Two reasons, both
+#: found by smoke-testing against real SLURM on Spartan (2026-07-18):
+#:   1. LOAD. Without it the witness query returned 163,608 rows for a single
+#:      user over 7 days — an entire accounting history enumerated and parsed
+#:      just to answer "is sacct recording?", repeatedly, on a SHARED LOGIN
+#:      NODE. Step rows are the bulk of that.
+#:   2. CORRECTNESS. Step states disagree with the allocation: a live lease
+#:      showed ``27305397|RUNNING`` alongside ``27305397.0|COMPLETED``. Any
+#:      consumer that saw the step row first could read a LIVE job as
+#:      finished. Filtering at the source is stronger than filtering on "."
+#:      afterwards (that filter stays, as defence in depth).
+_SACCT_FORMAT = (
+    "--allocations --noheader --parsable2 --format=JobID,State,NodeList,JobName"
+)
+
+
+@dataclass
+class LivenessResult:
+    """A verdict plus the evidence that produced it."""
+
+    verdict: str
+    reason: str
+    host: str = ""
+    job_id: str | None = None
+    name: str | None = None
+    node: str | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_dead(self) -> bool:
+        return self.verdict == DEAD
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "reason": self.reason,
+            "host": self.host,
+            "identifiers": {
+                "job_id": self.job_id,
+                "name": self.name,
+                "node": self.node,
+            },
+            "evidence": self.evidence,
+        }
+
+
+def _unknown(reason: str, **kw: Any) -> LivenessResult:
+    return LivenessResult(verdict=UNKNOWN, reason=reason, **kw)
+
+
+def _identity_mismatch(row: Row, *, name: str | None, node: str | None) -> str | None:
+    """Guard against a RECYCLED job-id now pointing at a different job."""
+    if name and row.name and row.name != name:
+        return f"job {row.job_id} is named {row.name!r}, asked about {name!r}"
+    if node and row.node and node not in row.node:
+        return f"job {row.job_id} runs on {row.node!r}, asked about {node!r}"
+    return None
+
+
+def job_liveness(
+    host: str,
+    *,
+    job_id: str | None = None,
+    name: str | None = None,
+    node: str | None = None,
+    sacct_window: str = DEFAULT_SACCT_WINDOW,
+    runner: Callable[..., Any] | None = None,
+) -> LivenessResult:
+    """Decide ALIVE / DEAD / UNKNOWN for a SLURM job on ``host``.
+
+    At least one of ``job_id`` / ``name`` is required (``node`` alone cannot
+    identify a job; supplied alongside another identifier it acts as an
+    extra cross-check, and a mismatch yields UNKNOWN).
+
+    ``runner`` is the dependency-injection seam, matching the ``runner=``
+    convention of ``_dispatch.py`` / ``_reservation.py`` / ``_walltime.py``:
+    a callable shaped like
+    ``exec_remote(host, command) -> result(returncode, stdout, stderr)``.
+    Defaults to :func:`scitex_ssh.exec_remote`.
+    """
+    run = runner if runner is not None else exec_remote
+    ids: dict[str, Any] = {"job_id": job_id, "name": name, "node": node}
+    evidence: dict[str, Any] = {"identifiers": dict(ids)}
+
+    if not job_id and not name:
+        return _unknown(
+            "no usable identifier: at least one of job_id / name is required "
+            "(node alone cannot identify a job)",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    # -- Step 1: the user's whole queue. -----------------------------------
+    # Deliberately NOT ``squeue --jobs=<id>``: squeue exits non-zero with
+    # "Invalid job id specified" once a job has left the queue, conflating
+    # "finished" with "query failed". Listing the user's entire queue exits 0
+    # whether or not our job is in it, so absence becomes a trustworthy
+    # observation instead of an error code we would have to second-guess.
+    probe = run_probe(run, host, "squeue --user=$USER --noheader --format='%i|%T|%N|%j'")
+    evidence["squeue"] = probe.summary()
+
+    failure = probe.failure_reason()
+    if failure is not None:
+        return _unknown(
+            f"squeue could not be trusted ({failure}); absence is not evidence "
+            "when the query did not provably run",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    rows, bad = parse_pipe_rows(probe.stdout)
+    if bad:
+        return _unknown(
+            f"squeue output had {len(bad)} unparseable data line(s), "
+            f"first={squash(bad[0], 120)!r}",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    if job_id:
+        matches = [r for r in rows if base_job_id(r.job_id) == base_job_id(job_id)]
+    else:
+        matches = [r for r in rows if r.name == name]
+    evidence["squeue_matches"] = [r.raw for r in matches]
+
+    distinct = sorted({base_job_id(r.job_id) for r in matches})
+    if len(distinct) > 1:
+        return _unknown(
+            f"name collision: {len(distinct)} distinct jobs matched "
+            f"({', '.join(distinct)}); refusing to pick one",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    if matches:
+        row = matches[0]
+        mismatch = _identity_mismatch(row, name=name, node=node)
+        if mismatch is not None:
+            return _unknown(
+                f"identity mismatch (possible recycled job-id): {mismatch}",
+                host=host,
+                evidence=evidence,
+                **ids,
+            )
+        if row.state in ACTIVE_STATES:
+            return LivenessResult(
+                verdict=ALIVE,
+                reason=f"squeue rc=0, job {row.job_id} present with state={row.state}",
+                host=host,
+                evidence=evidence,
+                **ids,
+            )
+        if row.state not in TERMINAL_STATES:
+            # SUSPENDED / RESIZING / REQUEUED — real SLURM states we refuse
+            # to read as either alive or over.
+            return _unknown(
+                f"job {row.job_id} present in squeue with non-committal "
+                f"state={row.state or '(empty)'}",
+                host=host,
+                evidence=evidence,
+                **ids,
+            )
+        # Terminal state still visible in squeue (the brief post-exit
+        # window). sacct must still confirm before we say DEAD.
+        evidence["squeue_terminal_state"] = row.state
+        if not job_id:
+            job_id = base_job_id(row.job_id)
+            ids["job_id"] = job_id
+
+    # -- Step 2: sacct. Absence from squeue alone is never enough. ---------
+    return _confirm_dead_via_sacct(
+        run,
+        host,
+        job_id=job_id,
+        name=name,
+        sacct_window=sacct_window,
+        evidence=evidence,
+        ids=ids,
+    )
+
+
+def _confirm_dead_via_sacct(
+    run: Callable[..., Any],
+    host: str,
+    *,
+    job_id: str | None,
+    name: str | None,
+    sacct_window: str,
+    evidence: dict[str, Any],
+    ids: Mapping[str, Any],
+) -> LivenessResult:
+    """Independent second confirmation. Only this can earn a DEAD verdict."""
+    ids = dict(ids)
+    if job_id:
+        scope = f"--jobs={_quote(base_job_id(job_id))}"
+    else:
+        scope = f"--user=$USER --name={_quote(str(name))}"
+    inner = f"sacct {scope} --starttime={_quote(sacct_window)} {_SACCT_FORMAT}"
+
+    probe = run_probe(run, host, inner)
+    evidence["sacct"] = probe.summary()
+
+    failure = probe.failure_reason()
+    if failure is not None:
+        return _unknown(
+            f"sacct could not be trusted ({failure}); squeue-absence alone is "
+            "not positive evidence of death",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    rows, bad = parse_pipe_rows(probe.stdout)
+    if bad:
+        return _unknown(
+            f"sacct output had {len(bad)} unparseable data line(s), "
+            f"first={squash(bad[0], 120)!r}",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    # Drop job steps (``12345.batch`` / ``12345.extern``); only the parent
+    # allocation's row describes the job as a whole.
+    rows = [r for r in rows if "." not in r.job_id]
+
+    if job_id:
+        matches = [r for r in rows if base_job_id(r.job_id) == base_job_id(job_id)]
+    else:
+        matches = [r for r in rows if r.name == name]
+    evidence["sacct_matches"] = [r.raw for r in matches]
+
+    distinct = sorted({base_job_id(r.job_id) for r in matches})
+    if len(distinct) > 1:
+        return _unknown(
+            f"name collision in sacct: {len(distinct)} distinct jobs matched "
+            f"({', '.join(distinct)}); refusing to pick one",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+
+    if matches:
+        return _verdict_from_sacct_row(
+            matches[0], name=name, host=host, evidence=evidence, ids=ids
+        )
+
+    return _verdict_from_sacct_absence(
+        run,
+        host,
+        sacct_window=sacct_window,
+        evidence=evidence,
+        ids=ids,
+    )
+
+
+def _verdict_from_sacct_row(
+    row: Row,
+    *,
+    name: str | None,
+    host: str,
+    evidence: dict[str, Any],
+    ids: Mapping[str, Any],
+) -> LivenessResult:
+    ids = dict(ids)
+    if name and row.name and row.name != name:
+        return _unknown(
+            "identity mismatch (possible recycled job-id): sacct job "
+            f"{row.job_id} is named {row.name!r}, asked about {name!r}",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+    if row.state in TERMINAL_STATES:
+        return LivenessResult(
+            verdict=DEAD,
+            reason=(
+                "squeue rc=0 and job absent from the queue; sacct rc=0 "
+                f"terminal={row.state} for job {row.job_id}"
+            ),
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+    if row.state in ACTIVE_STATES:
+        return _unknown(
+            f"contradiction: job absent from squeue but sacct reports "
+            f"state={row.state}; refusing to call it dead",
+            host=host,
+            evidence=evidence,
+            **ids,
+        )
+    return _unknown(
+        f"sacct state={row.state or '(empty)'} is neither active nor terminal; "
+        "refusing to guess",
+        host=host,
+        evidence=evidence,
+        **ids,
+    )
+
+
+def _verdict_from_sacct_absence(
+    run: Callable[..., Any],
+    host: str,
+    *,
+    sacct_window: str,
+    evidence: dict[str, Any],
+    ids: Mapping[str, Any],
+) -> LivenessResult:
+    """No sacct row for the target — ALWAYS UNKNOWN, never DEAD.
+
+    Three readings are indistinguishable from here: the job finished and has
+    no row we matched; the job-id predates the accounting retention window;
+    or sacct is not recording at all. Nothing observable separates them.
+
+    *** DELIBERATE — DO NOT RE-ADD A WITNESS QUERY. ***
+    An earlier revision inferred DEAD when a witness query
+    (``sacct --user=$USER`` over the same window) returned OTHER jobs, on the
+    reasoning that a provably-populated window makes this absence real. That
+    was removed on purpose (ruling 2026-07-18), for three reasons:
+
+      1. DEAD AUTHORISES DESTRUCTION; UNKNOWN DOES NOT. A DEAD verdict lets
+         the consumer tombstone a live agent's row. The irreversible branch
+         must not rest on an inference.
+      2. THE WITNESS IS AN INFERENCE, NOT AN OBSERVATION. "Other jobs exist,
+         therefore the window records, therefore THIS absence is real" is a
+         chain with two joints, and it still cannot separate "never existed"
+         from "cannot see that far back".
+      3. IT WAS EXPENSIVE. Measured on Spartan: 163,626 rows (55,576 even
+         with --allocations) parsed to answer a yes/no, once per resolution,
+         on a SHARED LOGIN NODE.
+
+    DEAD remains reachable — but only from a POSITIVE observation: sacct
+    rc=0 reporting an actual terminal state. Absence is not evidence.
+    """
+    del run, sacct_window  # no query is issued: absence can never be evidence
+    return _unknown(
+        "absent from sacct — cannot distinguish never-existed from "
+        "out-of-window (or sacct not recording); absence is not evidence, so "
+        "this is UNKNOWN and never DEAD",
+        host=host,
+        evidence=evidence,
+        **dict(ids),
+    )

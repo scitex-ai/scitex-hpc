@@ -27,7 +27,7 @@ COMMAND_CATEGORIES = [
     ("CI runners", ["ci-runners"]),
     ("Login-node guard", ["sentinel"]),
     ("Tunnel supervisor", ["tunnel-supervisor"]),
-    ("Decision info", ["walltime"]),
+    ("Decision info", ["walltime", "liveness"]),
     ("Introspection", ["list-python-apis", "mcp", "skills"]),
     ("Shell", ["install-shell-completion", "print-shell-completion"]),
 ]
@@ -134,6 +134,7 @@ def cli(ctx: click.Context, help_recursive: bool, as_json: bool) -> None:
 from ._apis import list_python_apis as _list_python_apis  # noqa: E402
 from ._ci_runners import ci_runners as _ci_runners_grp  # noqa: E402
 from ._completion import attach_shell_completion  # noqa: E402
+from ._liveness import liveness as _liveness_grp  # noqa: E402
 from ._login_guard import login_guard as _login_guard_grp  # noqa: E402
 from ._mcp_commands import mcp_group as _mcp_group  # noqa: E402
 from ._quota import quota as _quota_grp  # noqa: E402
@@ -149,6 +150,7 @@ cli.add_command(_login_guard_grp)
 cli.add_command(_tunnel_supervisor_grp)
 cli.add_command(_quota_grp)
 cli.add_command(_walltime_grp)
+cli.add_command(_liveness_grp)
 # Deprecated alias — same subcommands, emits a stderr notice (hidden
 # from --help so `lease` is the single documented name).
 cli.add_command(_reservations_alias)

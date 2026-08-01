@@ -115,6 +115,86 @@ def test_fragment_seeds_git_config_before_launching_run_sh():
     assert frag.index('> "$wd/.gitconfig"') < frag.index("./run.sh")
 
 
+def test_fragment_sets_per_runner_tool_cache():
+    """`$cache/uv/` was written by JOBS, racing on one shared path.
+
+    The supervisor provisions only Python, once, before any runner exists --
+    so the module's "shared + read-only across all runners" invariant has
+    never covered uv. setup-uv writes it at job runtime, and uv shipped 12
+    releases in ~5 weeks, so each new version misses the cache and the first
+    jobs to want it install concurrently into the same file (exit 127 on
+    07-23 and again on 07-29).
+    """
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert 'RUNNER_TOOL_CACHE="$wd/toolcache"' in frag
+
+
+def test_fragment_keeps_the_python_toolcache_shared_by_symlink():
+    # Arrange — 3 interpreters x 80 runners is pure duplication against an
+    # inode quota already at ~93%, and nothing writes Python at job time.
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert 'ln -sfn "$HOME/tc/Python" "$wd/toolcache/Python"' in frag
+
+
+def test_fragment_tool_cache_is_set_for_the_run_sh_invocation():
+    # Arrange — setting it anywhere but the run.sh env would leave the
+    # runner's own child processes reading the shared cache.
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert frag.index('RUNNER_TOOL_CACHE="$wd/toolcache"') < frag.index("./run.sh")
+
+
+def test_fragment_sets_per_runner_gh_config_dir():
+    """Third face of the shared-$HOME class, and the last one still live.
+
+    `gh` parses ~/.config/gh/config.yml at STARTUP, before it consults any
+    token, so the operator's corrupt copy aborts it before authentication —
+    no secret can rescue that. It has blocked scitex-logging PR #24 since
+    2026-07-12 while the same class was patched repo-by-repo (scitex-ui#68,
+    scitex-math#5) rather than at the launcher.
+    """
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert 'GH_CONFIG_DIR="$wd/gh"' in frag
+
+
+def test_fragment_does_not_seed_gh_config_from_the_shared_one():
+    """FORWARD guard only — it does NOT verify the GH_CONFIG_DIR change.
+
+    Checked against the unfixed generator and it PASSES there too, because
+    that generator never mentioned the shared gh config either. So this
+    asserts nothing about the current diff; keeping it anyway, correctly
+    labelled, because it pins a DECISION that a later change could quietly
+    undo.
+
+    The decision: unlike GIT_CONFIG_GLOBAL (seeded via ``include.path`` so
+    user.name/user.email still resolve), the gh config dir is deliberately
+    left EMPTY. Seeding it would copy in the corrupt config that IS the
+    defect -- gh parses config.yml at startup, before any token, and aborts.
+    CI auth comes from GH_TOKEN in Actions secrets, which needs no file. A
+    future "make it consistent with the git one" edit would look like a
+    tidy-up and would restore the bug; this fails if that happens.
+    """
+    # Arrange
+    r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
+    # Act
+    frag = runner_keepalive_fragment(r, toolcache="$HOME/tc", work_root="/tmp/w", backoff=15)
+    # Assert
+    assert "$HOME/.config/gh" not in frag
+
+
 def test_fragment_loops_for_restart():
     # Arrange
     r = RunnerSpec(name="scitex-hpc", dir=f"{CI_BASE}/actions-runner-scitex-hpc")
@@ -151,13 +231,51 @@ def test_body_includes_every_runner():
     assert body.count("./run.sh") == 3
 
 
-def test_body_ends_with_wait():
+def test_body_blocks_as_the_jobs_main_process():
+    """Was ``test_body_ends_with_wait``, which asserted the DEFECT.
+
+    The intent was right -- the supervisor must block as the job's main process
+    -- but pinning it to a body ENDING in ``wait`` encoded the bug as the
+    contract: a bare ``wait`` returns when the SIGUSR1 resubmit trap fires, so
+    the job exits ~1h early and the successor queues with no runner online
+    (16h03m dark on hop 27331011; 27709706 never backfilled). Anyone fixing the
+    defect saw a red suite and could reasonably conclude they had broken
+    something. Re-pointed at the property actually wanted -- blocking that
+    SURVIVES the trap -- rather than the shape that used to implement it.
+    """
     # Arrange
     fleet = _fleet("a")
     # Act
     body = build_supervisor_hold_body(fleet)
-    # Assert — the supervisor blocks on wait as the job's main process
-    assert body.rstrip().endswith("wait")
+    # Assert
+    assert "wait || true" in body
+
+
+def test_body_never_ends_on_a_bare_wait():
+    """Regression guard for the ~1h early surrender. See the test above."""
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert
+    assert [ln for ln in body.splitlines() if ln.strip() == "wait"] == []
+
+
+def test_body_ends_on_the_closed_wait_loop_not_a_fallthrough():
+    """Asserted on the LAST line, not on the presence of the sentinel loop.
+
+    Every per-runner keep-alive fragment already contains
+    ``while [ -f <sentinel> ]``, so a substring check for it PASSES against the
+    unfixed body and guards nothing -- verified by running it against the old
+    code. This keys on the one thing the defect changes: where control flow
+    ends.
+    """
+    # Arrange
+    fleet = _fleet("a")
+    # Act
+    body = build_supervisor_hold_body(fleet)
+    # Assert
+    assert body.rstrip().splitlines()[-1] == "done"
 
 
 def test_body_scrubs_easybuild_env():

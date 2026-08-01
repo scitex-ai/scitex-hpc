@@ -219,9 +219,55 @@ def runner_keepalive_fragment(
         # readable while writes land in the runner's own node-local file.
         f'    printf "[include]\\npath = %s\\n" "$HOME/.gitconfig" '
         f'> "$wd/.gitconfig"\n'
+        # Per-runner TOOL CACHE, with the Python subtree still SHARED.
+        #
+        # The supervisor provisions Python ONCE at start, before any runner
+        # exists, and the module docstring calls the cache "shared +
+        # read-only across all runners". That invariant holds for Python and
+        # has NEVER held for uv: `_provision_toolcache` only lays down
+        # Python, so `$cache/uv/` is written entirely by `setup-uv`, from
+        # jobs, at job runtime -- the exact concurrent write the invariant
+        # says cannot happen.
+        #
+        # Measured 2026-07-29/30: uv shipped 12 releases in ~5 weeks
+        # (0.11.23 -> 0.12.0). Each new version misses the shared cache, so
+        # the first jobs to request it all install into the same path at
+        # once and die `exit 127` on a binary another job is mid-write:
+        #   07-23  uv 0.11.31 missing -> 2 legs dead -> appeared 17 min later
+        #   07-29  uv 0.12.0  missing -> develop reddened
+        # It presents as an intermittent, PR-specific flake and is neither;
+        # a re-run is a coin flip that wins once someone else finishes.
+        #
+        # Python stays shared via symlink: 3 interpreters x 80 runners would
+        # be pure duplication against an inode quota already at ~93%, and
+        # nothing writes Python at job time. Everything setup-* DOES write
+        # lands in the runner's own dir, so there is no shared write path
+        # left to race on.
+        f'    mkdir -p "$wd/toolcache"\n'
+        f'    [ -e "$wd/toolcache/Python" ] || '
+        f'ln -sfn "{toolcache}/Python" "$wd/toolcache/Python"\n'
+        # Per-runner gh config dir — the THIRD face of the shared-$HOME class.
+        #
+        # `gh` parses ~/.config/gh/config.yml at STARTUP, before it looks at
+        # any token. The operator's copy is corrupt, so `gh` aborts before
+        # authentication and no secret can rescue it: scitex-logging's PR #24
+        # has been blocked on exactly this since 2026-07-12, and the same
+        # class was fixed repo-by-repo (scitex-ui#68, scitex-math#5) instead
+        # of here, where $HOME is actually handed to every runner.
+        #
+        # Deliberately NOT seeded from the real config. The other two faces
+        # seed (GIT_CONFIG_GLOBAL uses include.path so identity resolves) —
+        # copying here would import the corruption that IS the bug. CI auth
+        # comes from GH_TOKEN in Actions secrets, which `gh` reads from the
+        # environment and which needs no config file; an empty dir lets gh
+        # write its own defaults on first use.
+        f'    mkdir -p "$wd/gh"\n'
         f'    ( cd "$d" \\\n'
         f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
         f'           GIT_CONFIG_GLOBAL="$wd/.gitconfig" \\\n'
+        f'           RUNNER_TOOL_CACHE="$wd/toolcache" \\\n'
+        f'           AGENT_TOOLSDIRECTORY="$wd/toolcache" \\\n'
+        f'           GH_CONFIG_DIR="$wd/gh" \\\n'
         f'           PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
         f'           ./run.sh ) >> "{runner.log}" 2>&1\n'
         f'    rc=$?\n'
@@ -329,7 +375,30 @@ def build_supervisor_hold_body(fleet: FleetSpec) -> str:
         "# Block as the job's main process. Reservation(persistent=True)\n"
         "# wraps this body with a SIGUSR1 walltime-resubmit trap; on\n"
         "# resubmit a fresh supervisor takes over the new allocation.\n"
-        "wait\n"
+        "#\n"
+        "# SERVE OUT THE FULL WALLTIME -- a BARE `wait` surrenders the\n"
+        "# allocation ~1h early. `wait` is interrupted by the USR1 trap: the\n"
+        "# handler submits the successor, `wait` RETURNS, this script falls\n"
+        "# off the end, and SLURM tears the job down while the successor is\n"
+        "# still queueing. Measured on the pooled supervisor: Timelimit\n"
+        "# 1-00:00:00 with Elapsed 22:59:5x on EVERY hop -- and the forfeited\n"
+        "# hour is exactly the window meant to cover the successor's queue\n"
+        "# wait, so each successor queued with NO runner online:\n"
+        "#     27225547  submitted 07-14T12:21  started 12:22:20      64s\n"
+        "#     27281296  submitted 07-15T11:21  started 13:24:27   2h 02m\n"
+        "#     27331011  submitted 07-16T12:24  started 07-17T04:27 16h 03m\n"
+        "#     27709706  submitted 07-21T00:26  never backfilled   OUTAGE\n"
+        "# (cluster-local; Spartan is UTC+10.) Re-entering `wait` keeps this\n"
+        "# allocation serving jobs until SLURM kills it at the boundary, so\n"
+        "# the successor queues while the service is still UP. The overlap is\n"
+        "# free: it uses time already allocated and previously wasted. This\n"
+        "# does NOT lengthen the walltime.\n"
+        f"while [ -f {_sentinel()} ]; do\n"
+        "  wait || true\n"
+        "  # `wait` also returns immediately once no children remain; bound\n"
+        "  # the loop so a fully-dead runner set cannot spin the CPU.\n"
+        "  sleep 5\n"
+        "done\n"
     )
     return head + loops + pruner + tail
 

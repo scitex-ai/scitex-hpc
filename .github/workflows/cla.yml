@@ -1,5 +1,41 @@
 name: CLA Assistant
 
+# Org-level reusable-workflow caller (scitex-ai/.github, fleet standard).
+#
+# WHY THIS FILE IS SHAPED THE WAY IT IS — read before simplifying it back.
+#
+# `issue_comment` and `pull_request_target` are UNAUTHENTICATED triggers on a
+# public repo: a GitHub account is the whole barrier. Whatever this caller hands
+# to the callee is therefore handed to a job a stranger can start. Two
+# consequences, both deliberate below.
+#
+#   1. EXPLICIT SECRET MAPPING, NOT `secrets: inherit`.
+#      `inherit` forwards EVERY secret this repo holds. Measured 2026-08-02,
+#      scitex-hpc holds two:
+#          GH_PERSONAL_ACCESS_TOKEN      — the CLA-signature-storage PAT; needed
+#          CLAUDE_CODE_CREDENTIALS_JSON  — the fleet Claude credential; NOT needed
+#      The CLA has no use for the second one, so `inherit` was placing a fleet
+#      credential next to third-party CLA code for no benefit. The callee declares
+#      `secrets: GH_PERSONAL_ACCESS_TOKEN: required: true` precisely so a caller
+#      can pass the one secret instead. This is the supported path, not a
+#      workaround. The hazard is CREDENTIAL ADJACENCY, not which runner is used —
+#      so this mapping is correct independently of where the callee runs.
+#
+#   2. THE CALLEE IS PINNED BY SHA, NOT `@main`.
+#      A mutable org-level ref means one change to the reusable lands in every
+#      calling repo at once with no review in any of them — and the code it
+#      lands in holds a write token and a PAT, in a job an outsider can trigger.
+#      Pinning takes reusable updates deliberately. Bump the SHA after READING
+#      the diff; do not restore `@main` to avoid the bump.
+#
+# WHAT THIS DOES NOT FIX
+# ----------------------
+# The callee's jobs still declare `runs-on: [self-hosted, Linux, X64, spartan-cpu]`
+# (scitex-ai/.github .github/workflows/cla.yml, both jobs, verified 2026-08-02), so
+# CLA code still executes on persistent shared university hardware. That is the
+# callee's to change and is tracked separately — this file cannot fix it, and
+# narrowing what we hand over is worth doing regardless of the outcome there.
+
 on:
   issue_comment:
     types: [created]
@@ -17,9 +53,12 @@ jobs:
     # CLAssistant posts its commit status via a raw Statuses-API call with a
     # hardcoded context "CLAssistant" (not tied to this job id) — no
     # required-status-check rename needed.
+    uses: scitex-ai/.github/.github/workflows/cla.yml@1c5939858918fc83988955df15af3340da5c8fb1 # main@2026-07-31
     # owner_allowlist overridden: this repo's allowlist has an extra
     # "LLEmacs" entry beyond the reusable workflow's "bot*,ywatanabe1989" default.
-    uses: scitex-ai/.github/.github/workflows/cla.yml@main
+    # Taking the default would start demanding a CLA signature from an
+    # already-allowlisted contributor.
     with:
       owner_allowlist: "bot*,ywatanabe1989,LLEmacs"
-    secrets: inherit
+    secrets:
+      GH_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}

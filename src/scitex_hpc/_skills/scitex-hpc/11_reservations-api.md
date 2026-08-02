@@ -48,7 +48,7 @@ scitex-hpc lease book gpu-l40s --partition gpu-l40s --gpus 1 \
 scitex-hpc lease list
 scitex-hpc lease exec dev-pool 'hostname'
 scitex-hpc lease attach dev-pool
-scitex-hpc lease cancel dev-pool         # canonical teardown verb
+scitex-hpc lease close dev-pool          # canonical teardown verb
 ```
 
 ## `book` never auto-scancels
@@ -56,9 +56,11 @@ scitex-hpc lease cancel dev-pool         # canonical teardown verb
 If `Reservation.book(...)` polls past `--poll-timeout` while the SLURM
 job is still PENDING, it **saves the lease and returns** with `node =
 None`; the SLURM job stays queued. Run `Reservation.get(name).refresh()`
-(or `scitex-hpc lease refresh NAME`) later to pick up the node
-once SLURM schedules it. Tear down only via `cancel()` /
-`lease cancel`.
+(or `scitex-hpc lease sync-state NAME`) later to pick up the node
+once SLURM schedules it. Tear down only via `release()` / `lease close`.
+
+The Python method names (`Reservation.refresh()`, `.release()`) are
+unchanged — this migration moved the CLI verbs only.
 
 This is intentional — reservations are long-lived blockers, and an
 auto-cancel on poll timeout would silently undo the operator's queue

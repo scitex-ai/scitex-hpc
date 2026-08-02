@@ -46,7 +46,7 @@ def jobs():
             name="scitex-hpc.inode-quota-warn",
             kind="cron",
             schedule="*/30 * * * *",
-            command="scitex-hpc quota check",
+            command="scitex-hpc quota validate",
             description=(
                 "Early warning for the GPFS inode-quota wall: df -i the "
                 "tracked filesets and alarm via $SCITEX_CI_ALARM_CMD (exit "

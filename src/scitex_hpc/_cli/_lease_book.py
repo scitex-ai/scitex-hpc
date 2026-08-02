@@ -259,7 +259,7 @@ def adopt_cmd(ctx, name, job_id, host, persistent, no_refresh_node, as_json):
     already running instead of submitting a new one. Use this to bring an
     ad-hoc / externally-submitted hold-job under reservation management
     WITHOUT requesting a new node. After adopt, ``lease get NAME`` and
-    ``lease refresh NAME`` work normally; ``refresh`` re-discovers the
+    ``lease sync-state NAME`` work normally; ``sync-state`` re-discovers the
     job_id by NAME via squeue (so it survives a future re-key / resubmit).
 
     \b

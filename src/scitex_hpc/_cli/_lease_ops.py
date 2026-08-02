@@ -105,9 +105,15 @@ def exec_cmd(ctx, name, command, host, dry_run, yes):
 @click.command("sync-state")
 @click.argument("name")
 @click.option("--host", default=None)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Query squeue and print the record it WOULD write, without saving.",
+)
+@click.option("-y", "--yes", "yes", is_flag=True, help="Skip confirmation prompt.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON output.")
 @click.pass_context
-def sync_state_cmd(ctx, name, host, as_json):
+def sync_state_cmd(ctx, name, host, dry_run, yes, as_json):
     """Re-discover the current job_id via squeue (after walltime auto-resubmit).
 
     Reconciles the LOCAL lease record from SLURM's live state. It moves no
@@ -115,20 +121,42 @@ def sync_state_cmd(ctx, name, host, as_json):
     names its object (``sync-state``) rather than being a bare ``sync``.
 
     \b
+    It REWRITES the local lease record, so it takes ``--dry-run`` like the
+    other mutating verbs. The dry run performs the same squeue query and
+    prints the record it would have saved — it is the real answer withheld,
+    not a description of one.
+
+    \b
     Example:
       $ scitex-hpc lease sync-state dev-pool
+      $ scitex-hpc lease sync-state dev-pool --dry-run
       $ scitex-hpc lease sync-state dev-pool --json
     """
+    del yes
     res = Reservation.require(name, host=host)
-    res.refresh()
+    before = serialize_reservation(res)
+    res.refresh(save=not dry_run)
+    after = serialize_reservation(res)
     if as_json:
-        click.echo(_json.dumps(serialize_reservation(res), indent=2))
+        click.echo(
+            _json.dumps(
+                {"dry_run": True, "before": before, "would_write": after}, indent=2
+            )
+            if dry_run
+            else _json.dumps(after, indent=2)
+        )
+        return
+    if dry_run:
+        click.echo(f"DRY RUN — would sync lease state for {res.id}, not saved:")
+        for key in ("job_id", "node", "walltime_end"):
+            mark = " " if before[key] == after[key] else "*"
+            click.echo(f" {mark} {key}: {before[key]!r} -> {after[key]!r}")
         return
     if res.job_id:
-        click.echo(f"refreshed: id={res.id} job={res.job_id} node={res.node}")
+        click.echo(f"synced: id={res.id} job={res.job_id} node={res.node}")
     else:
         click.echo(
-            f"refreshed: id={res.id} (no live job found via squeue --name={res.name})",
+            f"synced: id={res.id} (no live job found via squeue --name={res.name})",
             err=True,
         )
         ctx.exit(2)

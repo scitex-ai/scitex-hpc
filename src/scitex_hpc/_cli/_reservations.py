@@ -6,7 +6,7 @@ This module owns three things and nothing else:
   2. the EXPLICIT registration of every subcommand onto it — the command
      bodies live in :mod:`_lease_book` (book / adopt, the two verbs that
      create an allocation) and :mod:`_lease_ops` (list / get / exec /
-     refresh / attach / cancel, which operate on one that exists);
+     sync-state / attach / close, which operate on one that exists);
   3. the deprecated ``reservations`` alias group.
 
 Registration is by ``add_command``, not by importing a module for its
@@ -19,9 +19,10 @@ kept as a **deprecated alias** that delegates to the same subcommands
 (see :class:`_DeprecatedAliasGroup` / :data:`reservations`) so existing
 callers keep working; it prints a one-line deprecation notice to stderr.
 
-``cancel`` is the canonical verb for tearing down a lease
-(``scancel`` + lease cleanup); the legacy ``release`` spelling is kept
-as a hidden alias for one minor-version cycle.
+The canonical verbs are ``sync-state`` (reconcile the local lease record
+from ``squeue``) and ``close`` (``scancel`` + lease cleanup). Their older
+spellings — ``refresh``, ``cancel``, ``release`` — stay registered as
+hidden, warning aliases for one minor-version cycle.
 """
 
 from __future__ import annotations
@@ -31,12 +32,14 @@ import click
 from ._lease_book import adopt_cmd, book_cmd
 from ._lease_ops import (
     attach_cmd,
-    cancel_cmd,
+    cancel_alias,
+    close_cmd,
     exec_cmd,
     get_cmd,
     list_cmd,
-    refresh_cmd,
-    release_cmd,
+    refresh_alias,
+    release_alias,
+    sync_state_cmd,
 )
 
 
@@ -51,15 +54,19 @@ def lease() -> None:
 
 
 for _cmd in (
+    # canonical
     book_cmd,
     adopt_cmd,
     list_cmd,
     get_cmd,
     exec_cmd,
-    refresh_cmd,
+    sync_state_cmd,
     attach_cmd,
-    cancel_cmd,
-    release_cmd,
+    close_cmd,
+    # deprecated spellings — hidden, warn once, same bodies
+    refresh_alias,
+    cancel_alias,
+    release_alias,
 ):
     lease.add_command(_cmd)
 del _cmd
@@ -126,7 +133,7 @@ reservations = _DeprecatedAliasGroup(
     hidden=True,
     help=(
         "(deprecated alias) Use 'scitex-hpc lease' instead. Forwards to "
-        "the same book / list / get / exec / refresh / attach / cancel "
+        "the same book / list / get / exec / sync-state / attach / close "
         "subcommands."
     ),
 )

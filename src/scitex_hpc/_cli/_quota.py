@@ -2,9 +2,10 @@
 
 Subcommands:
 
-  * ``check`` — ``df -i`` the tracked filesets and alarm (exit 1) if any is
+  * ``validate`` — ``df -i`` the tracked filesets and alarm (exit 1) if any is
     at/over the threshold (default 90%). The command the federated
-    ``scitex-hpc.inode-quota-warn`` cron JobSpec runs.
+    ``scitex-hpc.inode-quota-warn`` cron JobSpec runs. The older ``check``
+    spelling stays as a hidden, warning alias for one minor-version cycle.
 
 Cluster-agnostic (plain ``df -i``); no hostnames baked in beyond the
 ``--host`` / ``--path`` defaults, both overridable.
@@ -23,6 +24,7 @@ from .._quota import (
     alarm,
     check_inode_quota,
 )
+from ._deprecated_verb import deprecated_verb
 
 
 @click.group("quota")
@@ -35,7 +37,7 @@ def quota() -> None:
     """
 
 
-@quota.command("check")
+@click.command("validate")
 @click.option("--host", default="spartan", help="SSH host (default: spartan).")
 @click.option(
     "--path",
@@ -51,7 +53,7 @@ def quota() -> None:
     help="Alarm when inode usage %% is at/over this (default: 90).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit the report as JSON.")
-def check_cmd(host, paths, threshold_pct, as_json):
+def validate_cmd(host, paths, threshold_pct, as_json):
     """Report inode-quota usage; alarm + exit 1 if any fileset is over threshold.
 
     \b
@@ -60,8 +62,8 @@ def check_cmd(host, paths, threshold_pct, as_json):
 
     \b
     Example:
-      $ scitex-hpc quota check
-      $ scitex-hpc quota check --path /data/gpfs/projects/punim0264 \\
+      $ scitex-hpc quota validate
+      $ scitex-hpc quota validate --path /data/gpfs/projects/punim0264 \\
           --threshold 90 --json
     """
     report = check_inode_quota(
@@ -90,3 +92,11 @@ def check_cmd(host, paths, threshold_pct, as_json):
         )
         sys.exit(1)
     sys.exit(0)
+
+
+# ``check`` was the published spelling; it keeps working (hidden, warns once)
+# for one minor-version cycle. Built from validate_cmd, so it cannot drift.
+check_alias = deprecated_verb(validate_cmd, "check", group="quota")
+
+quota.add_command(validate_cmd)
+quota.add_command(check_alias)

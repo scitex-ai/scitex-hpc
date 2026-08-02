@@ -43,9 +43,13 @@ so the lease and queue position survive across operator workflows.
 | `lease list` | List active leases (lease-file view) |
 | `lease get NAME` | One lease as JSON |
 | `lease exec NAME 'CMD'` | Run `CMD` inside the allocation (returns stdout/stderr/exit) |
-| `lease refresh NAME` | Re-discover `job_id` via `squeue --name=...` (after walltime resubmit, or after a `book` poll-timeout) |
+| `lease sync-state NAME` | Reconcile the local lease record from `squeue --name=...` (after walltime resubmit, or after a `book` poll-timeout). Moves no files — `scitex_hpc.sync` is the file transfer |
 | `lease attach NAME` | Open an interactive shell on the compute node |
-| `lease cancel NAME` | `scancel` + clear lease state |
+| `lease close NAME` | `scancel` + clear lease state |
+
+Deprecated spellings still accepted for one minor-version cycle, each
+warning once on stderr: `lease refresh` → `sync-state`, `lease cancel` and
+`lease release` → `close`, `quota check` → `quota validate`.
 
 ### `book` flags
 
@@ -75,8 +79,8 @@ NAME                          (positional) lease label
 
 If `--poll-timeout` expires while the SLURM job is still PENDING, `book`
 **saves the lease and returns** with `node = null`. The SLURM job stays
-queued. Later, run `scitex-hpc lease refresh NAME` to fill in
-`node` once SLURM schedules it. Tear down only via `lease cancel`.
+queued. Later, run `scitex-hpc lease sync-state NAME` to fill in
+`node` once SLURM schedules it. Tear down only via `lease close`.
 
 Rationale: leases are intentionally idle blockers so an operator
 can `exec` workloads on demand. An auto-scancel on poll timeout would

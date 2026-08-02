@@ -28,7 +28,12 @@ COMMAND_CATEGORIES = [
     ("Login-node guard", ["sentinel"]),
     ("Tunnel supervisor", ["tunnel-supervisor"]),
     ("Decision info", ["walltime", "liveness"]),
-    ("Introspection", ["list-python-apis", "mcp", "skills"]),
+    # §13 places `dev` under Service (doctrine 10a_command-categories.md).
+    ("Service", ["dev"]),
+    # `skills` left Introspection when it moved to `dev skills` — what remains
+    # at top level is a hidden alias, and a hidden command in a category
+    # renders an empty heading.
+    ("Introspection", ["list-python-apis", "mcp"]),
     ("Shell", ["install-shell-completion", "print-shell-completion"]),
 ]
 

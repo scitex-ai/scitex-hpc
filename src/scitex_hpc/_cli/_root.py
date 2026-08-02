@@ -134,6 +134,8 @@ def cli(ctx: click.Context, help_recursive: bool, as_json: bool) -> None:
 from ._apis import list_python_apis as _list_python_apis  # noqa: E402
 from ._ci_runners import ci_runners as _ci_runners_grp  # noqa: E402
 from ._completion import attach_shell_completion  # noqa: E402
+from ._deprecated_group import deprecated_alias_group  # noqa: E402
+from ._dev import dev as _dev_grp  # noqa: E402
 from ._liveness import liveness as _liveness_grp  # noqa: E402
 from ._login_guard import login_guard as _login_guard_grp  # noqa: E402
 from ._mcp_commands import mcp_group as _mcp_group  # noqa: E402
@@ -156,7 +158,18 @@ cli.add_command(_liveness_grp)
 cli.add_command(_reservations_alias)
 cli.add_command(_list_python_apis)
 cli.add_command(_mcp_group)
-cli.add_command(_skills_group)
+
+# §13 (operator directive, doctrine 20_dev-commands.md): self-maintenance
+# surfaces mount under ONE `dev` group, so the top level reads as the domain
+# — leases, CI runners, quota, walltime, liveness — not as this tool's own
+# upkeep. `skills` moved to `dev skills`; the top-level spelling stays a
+# hidden warn-forward alias for one minor-version cycle.
+cli.add_command(_dev_grp)
+cli.add_command(
+    deprecated_alias_group(
+        "skills", target=_skills_group, replacement="scitex-hpc dev skills"
+    )
+)
 attach_shell_completion(cli, prog_name=PROG_NAME)
 
 

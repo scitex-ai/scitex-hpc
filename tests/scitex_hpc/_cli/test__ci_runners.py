@@ -1,17 +1,22 @@
 """CLI tests for the ``ci-runners exec-supervisor`` command (dry-run path).
 
 No SSH and no SLURM: discovery is replaced with a hand-rolled fake
-``_discover`` (real module-attribute mutation in a context manager — no
+``discover_fleet`` (real module-attribute mutation in a context manager — no
 ``monkeypatch``, no mocks), and the dry-run path never reaches
 ``exec_remote``. Assertions pin the generated srun invocation + body so a
 regression in the launch mechanics fails loudly.
+
+The swap targets :mod:`scitex_hpc._cli._ci_runners_common` — the ONE module
+that reads the cluster. Every ``ci-runners`` command calls it as
+``_common.discover_fleet(...)``, so this single seam covers commands in both
+``_ci_runners`` and ``_ci_runners_supervisor``.
 """
 
 from __future__ import annotations
 
 import contextlib
 
-from scitex_hpc._cli import _ci_runners as cli_mod
+from scitex_hpc._cli import _ci_runners_common as cli_mod
 from scitex_hpc._cli import main
 from scitex_hpc.ci_runners import FleetSpec, RunnerSpec
 
@@ -27,14 +32,14 @@ def _fleet(*names: str) -> FleetSpec:
 
 @contextlib.contextmanager
 def _fake_discover(fleet: FleetSpec):
-    """Swap module-level ``_discover`` for one returning ``fleet`` (no SSH)."""
+    """Swap ``discover_fleet`` for one returning ``fleet`` (no SSH)."""
     # Arrange — real attribute mutation, restored on exit.
-    prior = cli_mod._discover
-    cli_mod._discover = lambda host, ci_base, exclude: fleet
+    prior = cli_mod.discover_fleet
+    cli_mod.discover_fleet = lambda host, ci_base, exclude: fleet
     try:
         yield
     finally:
-        cli_mod._discover = prior
+        cli_mod.discover_fleet = prior
 
 
 def test_dry_run_is_default_and_does_not_launch(capsys):

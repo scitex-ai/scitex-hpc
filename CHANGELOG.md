@@ -7,6 +7,23 @@ follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`scitex-hpc liveness`** — a SLURM job-liveness instrument that answers
+  ALIVE / DEAD / **UNKNOWN** with the evidence it used. `UNKNOWN` is a
+  first-class answer, not an error: a probe that timed out or found no
+  witness must not be reported as either "running" or "gone", because
+  collapsing it into a pole is how a dead allocation gets treated as
+  healthy (and vice versa).
+- **`lease sync-state NAME --dry-run`** — perform the same `squeue` query
+  the real run performs and print the lease record it *would* have
+  written, without saving. Fields that would change are starred, so what
+  catches the eye is the edge rather than the middle:
+
+  ```
+  DRY RUN — would sync lease state for spartan-foo, not saved:
+    * job_id: '42' -> '200'
+    * node: '' -> 'bm175'
+      walltime_end: None -> None
+  ```
 - `lease adopt NAME --job-id <id> --host <host> [--persistent]` (also via
   the deprecated `reservations adopt` alias) — register an EXISTING
   running SLURM job as a lease WITHOUT submitting any sbatch. Writes the
@@ -32,9 +49,27 @@ follows [SemVer](https://semver.org/).
   surface.
 
 ### Changed
+- **Three CLI verbs moved to their canonical spellings.** Every old
+  spelling still works and prints a one-line notice to stderr naming its
+  replacement — nothing is removed in this release:
+
+  | old | new |
+  |---|---|
+  | `lease refresh` | `lease sync-state` |
+  | `lease cancel` | `lease close` |
+  | `lease release` | `lease close` |
+  | `quota check` | `quota validate` |
+
+  `lease release` was already a hidden alias but **never warned**; it does
+  now. `sync-state` names its object deliberately: in this package `sync`
+  already means "rsync files to the cluster" (`scitex_hpc.sync`), and this
+  verb moves no bytes — it reconciles the local lease record from
+  `squeue`. The Python API names (`Reservation.refresh()`, `.release()`)
+  are **unchanged**; this moved CLI verbs only.
 - **Renamed the `reservations` CLI command group to `lease`** (shorter,
-  now the primary/documented name). All subcommands are unchanged:
-  `book` / `list` / `get` / `exec` / `refresh` / `attach` / `cancel`.
+  now the primary/documented name). Subcommands are
+  `book` / `adopt` / `list` / `get` / `exec` / `sync-state` / `attach` /
+  `close`.
   `reservations` is kept as a **deprecated alias** that forwards to the
   exact same command objects (no duplicated logic) and prints a one-line
   deprecation notice to stderr — so existing `scitex-hpc reservations …`

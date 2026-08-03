@@ -98,12 +98,19 @@ def check_cmd(job_id, name, node, host, sacct_window, indent):
 
 
 @liveness.command("check-heartbeat")
-@click.option("--log", required=True, help="Path to the component's heartbeat log.")
+@click.option(
+    "--log",
+    required=True,
+    help="ABSOLUTE path to the component's heartbeat log ON THE REMOTE HOST. "
+    "A tilde path is expanded by your local shell before this command sees "
+    "it, so you would send your own home directory to another machine.",
+)
 @click.option(
     "--lock",
     default="",
-    help="Path to its lockfile. Without one, no holder can be observed and a "
-    "stale cadence can only ever be UNKNOWN.",
+    help="ABSOLUTE path to its lockfile on the remote host (same caveat as "
+    "--log). Without one, no holder can be observed and a stale cadence can "
+    "only ever be UNKNOWN.",
 )
 @click.option(
     "--interval",
@@ -166,10 +173,18 @@ def check_heartbeat_cmd(log, lock, interval, grace, match, host, indent):
     worse than none — both logs keep moving, so it presents as healthy.
 
     \b
+    PATHS ARE REMOTE AND MUST BE ABSOLUTE. A tilde is expanded by YOUR shell
+    before this command runs, so a tilde path sends your own home directory to
+    the remote host. On a container agent that is /home/agent, which does not
+    exist there — the probe then reports no log and the verdict is UNKNOWN.
+    Honest, but it is your path that was wrong, not the world.
+
+    \b
     Example:
       $ scitex-hpc liveness check-heartbeat \\
-          --log ~/.scitex/hpc/runtime/x.log \\
-          --lock ~/.scitex/hpc/runtime/x.lock --match bridge --host spartan
+          --log /home/ywatanabe/.scitex/hpc/runtime/x.log \\
+          --lock /home/ywatanabe/.scitex/hpc/runtime/x.lock \\
+          --match bridge --host spartan
     """
     config = JobConfig(project="", host=host)
     result = heartbeat_liveness(

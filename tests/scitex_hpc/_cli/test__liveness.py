@@ -100,6 +100,51 @@ def test_check_heartbeat_help_explains_the_node_rule(capsys):
     assert "node-local" in out
 
 
+def test_check_heartbeat_help_contains_no_tilde_anywhere(capsys):
+    # Arrange: a tilde is expanded by the LOCAL shell, so a copy-pasted path
+    # sends the operator's own home to a remote host — /home/agent on a
+    # container agent, which does not exist there. The help therefore DESCRIBES
+    # the hazard in words rather than demonstrating it, so that this check can
+    # match the thing instead of the vocabulary for the thing.
+    argv = ["liveness", "check-heartbeat", "--help"]
+    main(argv)
+    # Act
+    out = capsys.readouterr().out
+    # Assert
+    assert "~" not in out
+
+
+def test_check_heartbeat_help_actually_rendered(capsys):
+    # Arrange: guards the assertion above — an empty or failed help render
+    # would satisfy "no tilde" vacuously.
+    argv = ["liveness", "check-heartbeat", "--help"]
+    main(argv)
+    # Act
+    out = capsys.readouterr().out
+    # Assert
+    assert "scitex-hpc liveness check-heartbeat" in out
+
+
+def test_check_heartbeat_help_warns_that_paths_are_remote(capsys):
+    # Arrange
+    argv = ["liveness", "check-heartbeat", "--help"]
+    main(argv)
+    # Act
+    out = capsys.readouterr().out
+    # Assert
+    assert "expanded by YOUR shell" in out
+
+
+def test_check_heartbeat_help_says_paths_must_be_absolute(capsys):
+    # Arrange
+    argv = ["liveness", "check-heartbeat", "--help"]
+    main(argv)
+    # Act
+    out = capsys.readouterr().out
+    # Assert
+    assert "MUST BE ABSOLUTE" in out
+
+
 def test_check_heartbeat_requires_a_log(capsys):
     # Arrange: with no log there is nothing to read a cadence from.
     argv = ["liveness", "check-heartbeat"]

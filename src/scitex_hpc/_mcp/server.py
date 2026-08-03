@@ -15,7 +15,9 @@ try:
 except ImportError as e:  # pragma: no cover — fastmcp is optional
     raise ImportError(
         "fastmcp is required for scitex-hpc MCP support.\n"
-        "Install with: pip install scitex-hpc[mcp]"
+        "Install with: pip install 'scitex-hpc[all]'\n"
+        "(the separate mcp extra was removed under PS-225; installing it now "
+        "exits 0, warns, and installs nothing)"
     ) from e
 
 mcp = FastMCP("scitex-hpc")

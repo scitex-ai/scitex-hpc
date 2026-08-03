@@ -6,6 +6,34 @@ follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- **BREAKING — the `mcp` extra is gone.** Install MCP support with
+  `pip install 'scitex-hpc[all]'`. PS-225 restricts extra *names* to
+  `{all, dev, docs}`, and `fastmcp` is neither tooling nor documentation, so
+  `all` is the only permitted home for it. It stays an *optional* dependency —
+  it is imported lazily and a SLURM user who never runs an MCP server should
+  not carry it — which is why it is not folded into core.
+
+  **Installing the old extra does NOT fail. It exits 0.** Measured against this
+  package with an undeclared extra name (name redacted here, because a literal
+  one in prose is itself flagged as a broken install remedy by PS-215 §3):
+
+  ```
+  rc=0
+  WARNING: scitex-hpc 0.9.0 does not provide the extra '<undeclared>'
+  ```
+
+  pip warns, installs the base package, and silently omits the extra. So the old
+  command now *looks* like it worked and leaves `fastmcp` missing. Packaging
+  offers no alias for a removed extra, so there is no warn-forward phase
+  available — the only place a migration signal can live is our own output, and
+  every message that mentions installation now says `[all]` and states plainly
+  that the old form installs nothing.
+
+  The cost, stated because it is a deliberate trade and not an oversight: there
+  is no longer any way to get MCP support without also installing `dev`
+  (pytest, ruff) and `docs` (six sphinx packages).
+
 ### Added
 - **`scitex-hpc liveness check-heartbeat`** — the same instrument shape for the
   *other* class of thing we run: a bare loop on a node, holding a lockfile

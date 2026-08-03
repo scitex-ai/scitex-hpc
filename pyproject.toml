@@ -28,7 +28,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "pytest-timeout", "ruff", "scitex-dev>=0.11.7"]
-mcp = ["fastmcp>=0.1.0"]
 # Every entry here is a Sphinx extension enabled in docs/sphinx/conf.py.
 # Dev tooling belongs in `dev`, which already carries it.
 docs = [
@@ -39,7 +38,16 @@ docs = [
     "sphinx-autodoc-typehints>=1.25",
     "sphinx-click>=5.0",
 ]
-all = ["scitex-hpc[dev,mcp,docs]"]
+# PS-225 restricts extra NAMES to {all, dev, docs}, so the former `mcp` extra
+# (fastmcp) lives here rather than under its own name. fastmcp stays an OPTIONAL
+# dependency — it is imported lazily and a SLURM user who never runs an MCP
+# server should not carry it — so it belongs in an extra, and `all` is the only
+# permitted extra it can be in.
+#
+# THE COST, stated because it is a real trade and not an oversight: there is now
+# no way to get MCP support without also installing dev (pytest, ruff) and docs
+# (six sphinx packages).
+all = ["scitex-hpc[dev,docs]", "fastmcp>=0.1.0"]
 
 [project.urls]
 Homepage = "https://github.com/ywatanabe1989/scitex-hpc"

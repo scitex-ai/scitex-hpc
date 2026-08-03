@@ -13,6 +13,7 @@ import json as _json
 import click
 
 from .._config import JobConfig
+from .._heartbeat import DEFAULT_GRACE, heartbeat_liveness
 from .._liveness import DEFAULT_SACCT_WINDOW, job_liveness
 
 
@@ -92,5 +93,91 @@ def check_cmd(job_id, name, node, host, sacct_window, indent):
         name=name,
         node=node,
         sacct_window=sacct_window,
+    )
+    click.echo(_json.dumps(result.to_dict(), indent=indent or None))
+
+
+@liveness.command("check-heartbeat")
+@click.option("--log", required=True, help="Path to the component's heartbeat log.")
+@click.option(
+    "--lock",
+    default="",
+    help="Path to its lockfile. Without one, no holder can be observed and a "
+    "stale cadence can only ever be UNKNOWN.",
+)
+@click.option(
+    "--interval",
+    type=int,
+    default=None,
+    help="Cadence in seconds. Read from the START line ('interval=1800s') "
+    "when omitted.",
+)
+@click.option(
+    "--grace",
+    type=float,
+    default=DEFAULT_GRACE,
+    show_default=True,
+    help="Multiplier on the cadence before a missed tick counts as STALLED.",
+)
+@click.option(
+    "--match",
+    default="",
+    help="Substring the holder's /proc/<pid>/cmdline must contain; guards "
+    "against a recycled pid.",
+)
+@click.option(
+    "--host",
+    default=None,
+    help="SSH host to probe FROM. To earn STOPPED this must be the node the "
+    "component started on (falls back to $SCITEX_HPC_HOST / user config).",
+)
+@click.option(
+    "--indent",
+    type=int,
+    default=2,
+    show_default=True,
+    help="JSON indent (pass 0 for a single compact line).",
+)
+def check_heartbeat_cmd(log, lock, interval, grace, match, host, indent):
+    """Report whether a cadenced background loop is running, as JSON.
+
+    \b
+    For components that are NOT SLURM jobs: a bare loop holding a lockfile and
+    appending to a log on a fixed interval. `liveness check` cannot see these
+    at all — they live inside somebody else's allocation.
+
+    \b
+    Contract (the JSON `verdict` field is the contract, not the exit code):
+      ALIVE   A holder is observed AND the last tick is within interval*grace.
+      STALLED A holder is observed but the cadence was missed — the process
+              exists and is not doing its job. Never folded into ALIVE.
+      STOPPED Positive, NODE-LOCAL evidence of no holder: the recorded pid has
+              no /proc entry, or a non-blocking acquire of the lock succeeded,
+              and the probe ran on the node the component started on.
+      UNKNOWN Everything else — transport failure, truncated probe output, no
+              log, unknown cadence, a recycled pid, or any negative holder
+              observation made from a DIFFERENT node than the holder's.
+
+    \b
+    Why the node rule: /proc is node-local and flock is not guaranteed
+    cluster-coherent on shared storage, so a probe from the login node can
+    acquire a lock a compute node genuinely holds. A false STOPPED authorises
+    starting a second copy, and two copies read-modify-writing shared state is
+    worse than none — both logs keep moving, so it presents as healthy.
+
+    \b
+    Example:
+      $ scitex-hpc liveness check-heartbeat \\
+          --log ~/.scitex/hpc/runtime/x.log \\
+          --lock ~/.scitex/hpc/runtime/x.lock --match bridge --host spartan
+    """
+    config = JobConfig(project="", host=host)
+    result = heartbeat_liveness(
+        config.resolve("host"),
+        log=log,
+        lock=lock,
+        interval=interval,
+        grace=grace,
+        match=match,
     )
     click.echo(_json.dumps(result.to_dict(), indent=indent or None))

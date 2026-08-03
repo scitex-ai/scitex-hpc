@@ -7,6 +7,27 @@ follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`scitex-hpc liveness check-heartbeat`** — the same instrument shape for the
+  *other* class of thing we run: a bare loop on a node, holding a lockfile
+  and appending to a log on a fixed cadence. `liveness check` cannot see
+  these at all, because they live inside somebody else's allocation.
+  Answers ALIVE / **STALLED** / **STOPPED** / UNKNOWN with its evidence.
+
+  Two distinctions carry the design. **STALLED** (a holder exists but the
+  cadence was missed) is never folded into ALIVE — a process that is
+  present and not doing its job is the failure that a moving log disguises.
+  And **STOPPED must be earned from a node-local observation**: `/proc` is
+  node-local and `flock` is not guaranteed cluster-coherent on shared
+  storage, so a probe run from the login node can acquire a lock a compute
+  node genuinely holds. A false STOPPED authorises starting a replacement,
+  and two copies read-modify-writing shared state is worse than none —
+  both logs keep moving, so it presents as healthy. Any negative holder
+  reading taken from the wrong node is therefore UNKNOWN, never STOPPED.
+
+  A tick that is simply *not due yet* is ALIVE, not UNKNOWN: "no tick yet,
+  within interval" is a healthy reading and collapsing it into either pole
+  is the bug. Ages are computed from the remote clock against the
+  component's own UTC stamps, so no local timezone enters the arithmetic.
 - **`scitex-hpc liveness`** — a SLURM job-liveness instrument that answers
   ALIVE / DEAD / **UNKNOWN** with the evidence it used. `UNKNOWN` is a
   first-class answer, not an error: a probe that timed out or found no

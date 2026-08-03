@@ -58,3 +58,52 @@ def test_check_command_is_exposed_on_the_group():
     names = liveness.list_commands(ctx)
     # Assert
     assert "check" in names
+
+
+def test_check_heartbeat_command_is_exposed_on_the_group():
+    # Arrange
+    ctx = click.Context(liveness)
+    # Act
+    names = liveness.list_commands(ctx)
+    # Assert
+    assert "check-heartbeat" in names
+
+
+def test_check_heartbeat_leaf_is_verb_first():
+    # Arrange: §1 rejects a bare noun leaf ('heartbeat'), which is what the
+    # first cut of this command was called.
+    ctx = click.Context(liveness)
+    # Act
+    nouns = [n for n in liveness.list_commands(ctx) if not n.startswith("check")]
+    # Assert
+    assert nouns == []
+
+
+def test_check_heartbeat_help_documents_the_four_verdicts(capsys):
+    # Arrange
+    argv = ["liveness", "check-heartbeat", "--help"]
+    main(argv)
+    # Act
+    out = capsys.readouterr().out
+    # Assert
+    assert all(v in out for v in ("ALIVE", "STALLED", "STOPPED", "UNKNOWN"))
+
+
+def test_check_heartbeat_help_explains_the_node_rule(capsys):
+    # Arrange: the rule is the whole reason STOPPED is hard to earn, so it
+    # belongs in the help rather than only in the module docstring.
+    argv = ["liveness", "check-heartbeat", "--help"]
+    main(argv)
+    # Act
+    out = capsys.readouterr().out
+    # Assert
+    assert "node-local" in out
+
+
+def test_check_heartbeat_requires_a_log(capsys):
+    # Arrange: with no log there is nothing to read a cadence from.
+    argv = ["liveness", "check-heartbeat"]
+    # Act
+    code = main(argv)
+    # Assert
+    assert code == 2

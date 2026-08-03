@@ -33,12 +33,19 @@ UNKNOWN  Everything else. Transport failure, a truncated probe, no log, no
 
 Three traps this module encodes mechanically, each from a measured failure:
 
-1. **Wrong node.** ``flock(2)`` is not guaranteed cluster-coherent on GPFS, and
-   ``/proc`` is node-local by construction. A probe run on the login node
-   against a compute-node holder can acquire a lock that is genuinely held —
-   a false STOPPED. So a *negative* holder observation is only trusted when
-   ``probe_host`` matches the host the component recorded in its START line.
-   A *positive* one (lock held, PID alive) is safe from anywhere it is seen.
+1. **Wrong node.** ``/proc`` is node-local by construction, and ``flock(2)`` is
+   **measured non-coherent across nodes on Spartan's GPFS** — not merely
+   "not guaranteed". Probing the live gitconfig bridge from ``spartan-login1``
+   on 2026-08-03T07:20Z returned ``flock_rc=0`` (acquire SUCCEEDED) while the
+   bridge was demonstrably running on ``spartan-bm062``: its log had just
+   written ``07:15:36Z skip bytes=29109``, 197 lines, on an exact 30-minute
+   cadence, with a single START line proving the original process.
+
+   A naive "acquire succeeded therefore nobody holds it" would have answered
+   STOPPED for a healthy component on that very call. So a *negative* holder
+   observation is trusted only when ``probe_host`` matches the host recorded
+   in the START line. A *positive* one (lock held, PID alive) is safe from
+   anywhere it is seen — the asymmetry is the whole point.
 2. **Absent output read as absence in the world.** No log means UNKNOWN — "the
    path is wrong" and "it never started" are indistinguishable from here.
 3. **Truncation read as data.** The probe emits ``__HB__end=1`` last; without

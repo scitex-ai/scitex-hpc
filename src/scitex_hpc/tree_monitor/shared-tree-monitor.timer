@@ -1,0 +1,18 @@
+[Unit]
+Description=Run the shared-tree catch-it-live monitor every 5 minutes
+Documentation=card:spartan-shared-tree-catch-it-live-monitor
+
+[Timer]
+# 5 minutes: short enough that the forensics (parent listing, squeue snapshot,
+# active sessions) are still contemporaneous with the deletion, long enough
+# that a stat of a handful of paths is negligible on a shared login node.
+OnBootSec=2min
+OnUnitActiveSec=5min
+# Persistent so a missed window after a reboot runs once on the next start
+# rather than silently skipping — a monitor that stops at reboot is exactly
+# the gap the incidents fell through.
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

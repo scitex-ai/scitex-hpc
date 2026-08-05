@@ -34,8 +34,20 @@ name: release
 # fail-loud: a missing SIF/shim/interpreter is a HARD error, never a
 # bare-runner fallback.
 #
-# runs-on driven by repo Actions Variable CI_RUNS_ON; SIF + apptainer paths
-# come from SCITEX_CI_SIF / SCITEX_CI_APPTAINER (same as pytest-matrix).
+# runs-on: PINNED to spartan-cpu, deliberately NOT the pooled CI_RUNS_ON
+# variable that PR CI uses. These jobs apptainer-exec ci-cpu.sif, and that
+# SIF today exists only on the Spartan pool. The `scitex-ci` label is shared
+# with scitex-compute-01/02 (apptainer 1.5.3 present, ci-cpu.sif ABSENT), so
+# reading the pooled variable here would let a TAG land on a host that cannot
+# run the publish path — a failure that surfaces only at release time, long
+# after PR CI looks healthy, and that nobody is watching for when new runners
+# join the pool.
+#   Revert these four jobs to the pooled variable in one line once ci-cpu.sif
+#   exists at the destination. The fact to wait for is "the destination has
+#   ci-cpu.sif", NOT "the runners are up" — those are different facts and only
+#   the first makes this safe to unpin.
+# SIF + apptainer paths come from SCITEX_CI_SIF / SCITEX_CI_APPTAINER
+# (same as pytest-matrix).
 #
 # Manual re-run: the workflow also accepts a `version` input via
 # workflow_dispatch so you can re-publish without re-tagging.
@@ -56,7 +68,7 @@ env:
 
 jobs:
   test:
-    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","Linux","X64","scitex-ci"]') }}
+    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +98,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","Linux","X64","scitex-ci"]') }}
+    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
@@ -116,7 +128,7 @@ jobs:
 
   publish:
     needs: build
-    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","Linux","X64","scitex-ci"]') }}
+    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
     environment:
       name: pypi
       url: https://pypi.org/p/scitex-hpc
@@ -142,7 +154,7 @@ jobs:
 
   release:
     needs: [build, publish]
-    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","Linux","X64","scitex-ci"]') }}
+    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
     permissions:
       contents: write
     steps:

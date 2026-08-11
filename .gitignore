@@ -24,3 +24,10 @@ logs/
 *.log
 .DS_Store
 docs/to_claude/
+
+# Local linked git worktrees. Every topic branch is developed in a worktree
+# under here, so the directory is per-checkout scaffolding, never source.
+.worktrees/
+
+# Agent scratch — per-machine notes and working files, never source.
+GITIGNORED/

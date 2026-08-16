@@ -27,9 +27,56 @@ This package is the same treatment already given to the pooled CI supervisor
 ## Layout
 
 ```
-serve-model.sh     the script, captured verbatim from Spartan
+serve-model.sh     starts and supervises ONE engine
+serve-pair.sh      holds a multi-GPU allocation, one serve-model.sh per GPU
 models.d/*.conf    one small config per served engine
 ```
+
+## `serve-pair.sh` — the pairing is a script, not a habit
+
+`serve-model.sh` runs exactly one engine, and the operator's 2026-08-15 ruling
+is one instance **per GPU** rather than one model spread across GPUs (TP=1). So
+a 2-GPU allocation needs two engines:
+
+```sh
+sbatch --job-name=qwen38-27b-serve serve-pair.sh qwen38-27b qwen38-27b-b
+```
+
+Until now the second engine was added **by hand** with `srun --overlap` after
+the job had started. That works, is invisible to anyone reading the job later,
+and — crucially — is not reproduced when the job resubmits itself at walltime.
+A step that only exists because someone typed it does not survive the thing it
+was meant to survive.
+
+Three things it deliberately does **not** do, each of which is how the obvious
+implementation breaks:
+
+- **It does not set `CUDA_VISIBLE_DEVICES`.** Each conf exports its own, and
+  `serve-model.sh` *sources* the conf, so the export reaches the vLLM child.
+  Setting it in the wrapper would silently override the confs and put both
+  replicas on one card, where the second OOMs against the first. The conf is
+  the load-bearing layer; the wrapper must not compete with it.
+- **It does not let the steps resubmit themselves.** `--signal=B:USR1@3600` —
+  the `B:` prefix delivers USR1 to the *batch shell only*, never to job steps,
+  so `serve-model.sh`'s own trap cannot fire under the wrapper. Dropping `B:`
+  would produce three resubmissions per walltime instead of one.
+- **It does not run the engines in the foreground.** They are backgrounded with
+  `wait`, because a foreground child blocks trap delivery until it exits — the
+  trap would simply never run.
+
+### A known asymmetry, documented rather than "fixed"
+
+| key | pin |
+|---|---|
+| `qwen38-27b-b` | `CUDA_VISIBLE_DEVICES=1` |
+| `qwen38-27b` | none — relies on vLLM defaulting to GPU 0 |
+| `qwen38-27b-c`, `-d` | none — single-GPU nodes, correct as-is |
+
+The pair works because B pins to card 1 and A takes card 0 by default. That is
+correct today but *implicit*. It is recorded here rather than corrected,
+because those confs are currently driving live engines and an unrequested
+change to a load-bearing file — to make something already working more
+explicit — is how a working system becomes a broken one.
 
 `serve-model.sh <KEY>` reads `models.d/<KEY>.conf`. The conf is sourced **once**
 at startup, so a conf change takes effect when the *script* restarts — not when

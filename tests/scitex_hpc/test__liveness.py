@@ -496,6 +496,85 @@ def test_no_failure_path_ever_yields_dead(label):
     assert result.verdict != DEAD, f"{label} produced DEAD: {result.reason}"
 
 
+@pytest.mark.parametrize("label", UNKNOWN_CASES)
+def test_every_unknown_says_what_it_fails_to_distinguish(label):
+    """``reason`` says why we answered; this says what the answer does NOT rule out.
+
+    Swept over the same registry as the DEAD invariant on purpose: a new
+    failure path added there is checked for BOTH properties or neither, so the
+    two cannot drift apart.
+    """
+    # Arrange
+    runner, kwargs, _substring = _unknown_cases()[label]
+    # Act
+    payload = job_liveness(HOST, runner=runner, **kwargs).to_dict()
+    # Assert
+    assert "not observed" in payload["does_not_distinguish"], label
+
+
+def _committal_results():
+    """The two verdicts that DID decide, arranged the way this suite arranges them.
+
+    DEAD needs an EMPTY squeue plus a terminal sacct row: a bare ``COMPLETED``
+    in squeue is not enough, because DEAD must be earned. Getting that wrong is
+    how the first version of these tests passed a hedge-free assertion against
+    an UNKNOWN — hence the control below.
+    """
+    return {
+        ALIVE: job_liveness(
+            HOST,
+            job_id=JOB,
+            runner=FakeRunner(squeue=_res(stdout=_squeue_out(_row(state="RUNNING")))),
+        ),
+        DEAD: job_liveness(
+            HOST,
+            job_id=JOB,
+            name=NAME,
+            runner=FakeRunner(
+                squeue=_res(stdout=BANNER),
+                sacct=_res(stdout=BANNER + _row(state="COMPLETED") + "\n"),
+            ),
+        ),
+    }
+
+
+@pytest.mark.parametrize("verdict", [ALIVE, DEAD])
+def test_committal_fixture_really_produces_that_verdict(verdict):
+    """POSITIVE CONTROL for the two tests below.
+
+    Without it they assert 'no disclaimer' against a result that might be
+    UNKNOWN, and would report green while measuring the opposite case.
+    """
+    # Arrange
+    results = _committal_results()
+    # Act
+    result = results[verdict]
+    # Assert
+    assert result.verdict == verdict
+
+
+@pytest.mark.parametrize("verdict", [ALIVE, DEAD])
+def test_committal_verdict_has_no_disclaimer(verdict):
+    """A verdict that DID decide must not carry a hedge that undermines it."""
+    # Arrange
+    results = _committal_results()
+    # Act
+    result = results[verdict]
+    # Assert
+    assert result.does_not_distinguish is None
+
+
+@pytest.mark.parametrize("verdict", [ALIVE, DEAD])
+def test_committal_verdict_omits_the_disclaimer_key(verdict):
+    """Absent from the payload entirely, not present-and-null."""
+    # Arrange
+    results = _committal_results()
+    # Act
+    payload = results[verdict].to_dict()
+    # Assert
+    assert "does_not_distinguish" not in payload
+
+
 def test_untrustworthy_squeue_does_not_proceed_to_sacct():
     """Absence is not evidence when the first query did not provably run."""
     # Arrange

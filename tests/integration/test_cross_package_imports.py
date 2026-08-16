@@ -41,22 +41,56 @@ CROSS_PACKAGE_IMPORTS = [
 _PYPROJECT = pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 
-def _declared_distributions() -> set[str]:
-    """Distribution names in [project].dependencies, normalised to module form.
+def _dependency_specs() -> list[str]:
+    """Raw [project].dependencies strings.
 
     Reads the file rather than the installed metadata on purpose: metadata
     survives the source vanishing, so it answers "was this ever installed?"
     rather than "does this package declare it?".
     """
     data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
-    declared = data.get("project", {}).get("dependencies", [])
-    names = set()
-    for spec in declared:
-        dist = spec.split(";")[0]
-        for sep in ("==", ">=", "<=", "~=", "!=", ">", "<", "[", " "):
-            dist = dist.split(sep)[0]
-        names.add(dist.strip().replace("-", "_"))
-    return names
+    return list(data.get("project", {}).get("dependencies", []))
+
+
+def _is_unconditional(spec: str) -> bool:
+    """False when the spec carries a PEP 508 environment marker."""
+    return ";" not in spec
+
+
+def _distribution_name(spec: str) -> str:
+    dist = spec.split(";")[0]
+    for sep in ("==", ">=", "<=", "~=", "!=", ">", "<", "[", " "):
+        dist = dist.split(sep)[0]
+    return dist.strip().replace("-", "_")
+
+
+def _declared_distributions() -> set[str]:
+    """Dependencies that must import UNCONDITIONALLY on every interpreter.
+
+    A spec carrying an ENVIRONMENT MARKER is deliberately excluded. Marker
+    dependencies are a THIRD class, not a variant of declared:
+
+        tomli>=2.0; python_version < "3.11"
+
+    is declared, and LEGITIMATELY ABSENT on 3.12 — behaving exactly as
+    specified. Treating it as declared would hard-import it and fail the suite
+    for a dependency doing the right thing, which is the strict pole of the
+    same both-poles-are-bugs mistake this file exists to avoid.
+
+    Excluded specs fall to the skippable path, whose root-skip +
+    full-path-hard-import is already the correct behaviour for them: absence
+    may be legitimate on this interpreter, but a PRESENT root with a broken
+    path is still a failure.
+
+    Measured by scitex-dev across the fleet: 1 of 531 dependency specs in 18
+    repos carries a marker. That density is exactly what survives review and
+    fails later, which is why this is handled while it cannot yet bite here.
+    """
+    return {
+        _distribution_name(spec)
+        for spec in _dependency_specs()
+        if _is_unconditional(spec)
+    }
 
 
 def _is_declared(module_name: str) -> bool:
@@ -89,6 +123,72 @@ def test_at_least_one_import_is_declared():
     count = len(declared)
     # Assert
     assert count > 0, f"no cross-package import resolved as declared: {CROSS_PACKAGE_IMPORTS}"
+
+
+def test_every_dependency_spec_yields_a_distribution_name():
+    """CONTROL: a spec the parser cannot read must FAIL, never be demoted.
+
+    An unparsed spec would silently produce an empty name, fall out of the
+    declared set, and land in the permissive pole — restoring the skip-everything
+    behaviour while the file still LOOKS rigorous. Unparseable is not optional,
+    the same way unreadable is not absent.
+    """
+    # Arrange
+    specs = _dependency_specs()
+    # Act
+    unparsed = [s for s in specs if not _distribution_name(s)]
+    # Assert
+    assert unparsed == [], f"could not extract a distribution name from: {unparsed}"
+
+
+def test_a_marker_spec_is_not_unconditional():
+    """The classifier itself, exercised on a real marker spec.
+
+    Asserted against a SYNTHETIC input rather than this repo's dependencies,
+    which currently carry no markers — a guard that only ever evaluates an empty
+    list has not been observed working. This is scitex-dev's measured case:
+    1 of 531 specs across 18 repos, `tomli` on Python < 3.11.
+    """
+    # Arrange
+    spec = 'tomli>=2.0; python_version < "3.11"'
+    # Act
+    unconditional = _is_unconditional(spec)
+    # Assert
+    assert unconditional is False
+
+
+def test_a_marker_spec_still_yields_its_distribution_name():
+    """Excluding it must not mean failing to parse it — those are different states."""
+    # Arrange
+    spec = 'tomli>=2.0; python_version < "3.11"'
+    # Act
+    name = _distribution_name(spec)
+    # Assert
+    assert name == "tomli"
+
+
+def test_a_plain_spec_is_unconditional():
+    """CONTROL: the predicate must not reject everything.
+
+    Without this, `return False` would satisfy the two tests above and demote
+    every dependency to skippable — the permissive pole, silently.
+    """
+    # Arrange
+    spec = "scitex-config>=0.3.0"
+    # Act
+    unconditional = _is_unconditional(spec)
+    # Assert
+    assert unconditional is True
+
+
+def test_no_declared_dependency_of_this_repo_carries_a_marker():
+    """Today's state, stated so a future marker addition is a visible change."""
+    # Arrange
+    specs = _dependency_specs()
+    # Act
+    conditional = [s for s in specs if not _is_unconditional(s)]
+    # Assert
+    assert conditional == []
 
 
 def test_every_import_is_classified():

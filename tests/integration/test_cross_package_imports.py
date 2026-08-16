@@ -114,10 +114,20 @@ def test_declared_dependency_imports_without_skipping(module_name):
 
 @pytest.mark.parametrize("module_name", OPTIONAL_IMPORTS)
 def test_optional_peer_imports_when_present(module_name):
-    """An optional peer may be absent in a lean install; when present it must import."""
+    """Absent peer -> skip. Present peer with a broken path -> FAIL.
+
+    The skip is taken on the ROOT, and the full dotted path is then imported
+    HARD. That distinction is the whole point: `importorskip` on the full path
+    swallows ModuleNotFoundError, and a renamed submodule
+    (`scitex_io._load_cache` -> `scitex_io._loading._load_cache`) raises exactly
+    that -- so skipping on the full path reports the gate's motivating failure
+    as green. Absent peer and broken path are different states; collapsing them
+    is the same two-valued mistake as everywhere else.
+    """
     # Arrange
-    name = module_name
+    root = module_name.split(".")[0]
     # Act
-    module = pytest.importorskip(name)
+    pytest.importorskip(root)
+    module = importlib.import_module(module_name)
     # Assert
     assert module is not None

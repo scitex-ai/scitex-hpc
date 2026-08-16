@@ -54,35 +54,64 @@ importing dead configuration into a fresh package would reproduce the exact
 rot this package was created in response to. They remain on Spartan and in
 `$DISCD/.old/` if ever needed.
 
-## Known defects, not yet fixed here
+## The engine publishes its own identity
 
-This file is a **verbatim capture**. It is committed unchanged so that the
-script has a history before it has edits, and so the next commit's diff is
-exactly the behaviour change and nothing else. Two defects are known and
-deliberately left for that commit:
+Two defects were found on 2026-08-16 and are fixed. Both were cases of identity
+being asserted once, by hand, and never revisited.
 
-1. **The job name is never set.** The script starts a model but does not name
-   the allocation after it, so a job repointed at a new model keeps its old
-   name. On 2026-08-16 all three serving jobs were named for models they no
-   longer ran (`muse-serve-permanent` serving qwen38, and so on). That naming
-   led an operator to propose releasing a live allocation, and led this agent
-   to twice assert a dependency on a model that had already stopped. A name is
-   the cheapest thing in the system to read, so it is the thing everyone reads
-   first; when it lies it does not fail loudly, it produces confident and
-   well-reasoned wrong plans.
+**1. The job now names itself.** `_resubmit` had always submitted as
+`$KEY-serve`, so a job that resubmitted was named correctly. The drift came
+from the other path: repointing a live allocation with `srun --overlap` — the
+technique for swapping models *without releasing a node* — renames nothing, so
+the allocation keeps whatever it was first called. On 2026-08-16 all three
+serving jobs were named for models that had stopped days earlier
+(`muse-serve-permanent` and `gptoss-serve-permanent` were both running
+qwen38-27b). That naming led to a proposal to release a **live** allocation,
+which is irreversible here, and to two false claims about a dependency on an
+already-stopped model.
 
-2. **The discovery file is written on ready and never removed.** The header
-   states that a consumer should enumerate `$DISCD/*-endpoint.json` rather than
-   hardcode a port — so that directory is the sanctioned answer to "what is
-   served where". On 2026-08-16 it held eight entries of which four described
-   models that no longer existed: a 50% false-positive rate for anyone
-   following the documented protocol. The four live entries were correct and
-   current, so the mechanism works; nothing deletes an entry when a model
-   stops, and write-on-start without remove-on-stop guarantees this outcome
-   given time.
+The convention was not invented for the fix — the script already declared
+`$KEY-serve` at line 83. It is now applied on the path that skipped it.
 
-Both fixes belong at the READY block, which already publishes the discovery
-file and is therefore where identity should be published.
+**2. The discovery entry is now withdrawn on exit.** It was written on ready
+and never removed, so a stopped model left a record indistinguishable from a
+live one. The directory held eight entries of which four described models that
+had not run for days — a 50% false-positive rate for anyone following the
+protocol this script's own header prescribes.
+
+A trap cannot cover `SIGKILL` or a node failure, so removal is necessary and
+not sufficient. The record therefore also carries `job_id`, letting a reader
+confirm the owning allocation still exists instead of trusting the file's
+presence. Absence of a record now means absent; presence still has to be
+checked.
+
+Both live at the READY block, which is where the model is proven up. An
+identity published before `/health` answers would be a claim rather than an
+observation.
+
+## Why there is no port table here any more
+
+The header used to carry one, listing each model's vllm/litellm/tunnel ports.
+It is deliberately gone rather than corrected: on 2026-08-16 it still described
+three models that had stopped and named none of the four engines actually
+serving.
+
+That table was one of **three** descriptive layers that had rotted together —
+the SLURM job names and the discovery directory were the others — and each
+looked authoritative on its own. The confs stayed correct throughout.
+
+The confs stayed correct because `serve-model.sh` **reads** them. They are
+load-bearing; a comment is not. So the fix is not to update the table but to
+not keep one:
+
+```
+grep -H '^\(VLLM\|LITELLM\|TUNNEL\)_PORT=' $CONFD/*.conf
+```
+
+The one thing still written down is the reservation of port 18765 for the
+`codex` provider — because that is **not** derivable from the confs. It is a
+constraint imposed from outside this script, and the confs record only what we
+did allocate, never what we must not.
 
 ## Why the confs are the only layer that stayed honest
 

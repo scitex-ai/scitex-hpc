@@ -28,7 +28,7 @@ def jobs():
 
     return [
         JobSpec(
-            name="scitex-hpc.ci-supervisor-watch",
+            name="scitex-hpc-ci-supervisor-watch",
             kind="cron",
             schedule="*/5 * * * *",
             command="scitex-hpc ci-runners watch",
@@ -43,7 +43,7 @@ def jobs():
             timeout_sec=120,
         ),
         JobSpec(
-            name="scitex-hpc.inode-quota-warn",
+            name="scitex-hpc-inode-quota-warn",
             kind="cron",
             schedule="*/30 * * * *",
             command="scitex-hpc quota validate",

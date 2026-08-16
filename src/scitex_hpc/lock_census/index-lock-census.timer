@@ -1,0 +1,25 @@
+[Unit]
+Description=Run the index.lock census every 6 hours
+Documentation=card:spartan-85-of-139-repos-write-locked-by-stale-index-lock-20260815
+
+[Timer]
+# INTERVAL, NOT OnCalendar, AND THAT IS DELIBERATE.
+# The locks cluster at 02:00-03:59 "local", and the obvious design is a daily
+# OnCalendar run shortly after that window. But the timezone on this host is
+# exactly what cannot be trusted: a `systemctl --user list-timers` reading came
+# back in JST while every other record of Spartan asserts AEST, and that
+# confusion has already produced one phantom anomaly between two agents.
+# A wall-clock schedule built on the wrong timezone would miss the window
+# silently — the monitor would run faithfully, forever, at the wrong hour.
+# Every 6 hours cannot miss a nightly event under ANY timezone assumption, and
+# 108 stats four times a day is free.
+OnBootSec=10min
+OnUnitActiveSec=6h
+# Persistent so a window missed across a reboot runs once on next start rather
+# than being skipped. A monitor that quietly stops at reboot is the gap the
+# original incident fell through.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Read-only census of stale .git/index.lock across the Spartan repo estate
+Documentation=card:spartan-85-of-139-repos-write-locked-by-stale-index-lock-20260815
+# WHY: 59 of 108 Spartan repos were found write-locked by 0-byte index.lock on
+# 2026-08-15, some for up to two months, by a recurring nightly process nobody
+# has identified. Clearing them destroyed their mtimes — the only evidence that
+# could have named the cause. This captures the NEXT occurrence before anyone
+# clears it.
+
+[Service]
+Type=oneshot
+ExecStart=%h/.scitex/hpc/scripts/index-lock-census.sh
+# exit 1 means "locks are present" — that is the monitor WORKING, not failing.
+# Without this, systemd marks the unit failed on a true positive, and then every
+# real detection looks identical to a broken unit.
+# NOTE exit 2 is deliberately NOT included: 2 means the globs matched no repos
+# at all, which is a failed look and SHOULD render as a failure.
+SuccessExitStatus=0 1
+# Never let the monitor become the load problem on a shared login node.
+Nice=19
+IOSchedulingClass=idle

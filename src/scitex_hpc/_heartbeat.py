@@ -119,8 +119,29 @@ class HeartbeatResult:
     def is_stopped(self) -> bool:
         return self.verdict == STOPPED
 
+    @property
+    def does_not_distinguish(self) -> str | None:
+        """What this verdict FAILS to mean — stated, not left to be inferred.
+
+        Derived rather than stored: HeartbeatResult is constructed directly at
+        a dozen sites, so a field would be one someone forgets at the
+        thirteenth. A property cannot be omitted.
+        """
+        if self.verdict != UNKNOWN:
+            return None
+        return (
+            "UNKNOWN IS NOT A NEGATIVE RESULT. This is the same output a "
+            "RUNNING component produces when the probe could not reach its "
+            "host, could not read the log, or saw the holder from a DIFFERENT "
+            "node than the one holding it — so it does not distinguish "
+            "'stopped' from 'not observed'. Starting a second copy on this "
+            "reading is the precise failure STOPPED exists to prevent: two "
+            "copies read-modify-writing shared state both keep their logs "
+            "moving, so the damage presents as health."
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "verdict": self.verdict,
             "reason": self.reason,
             "host": self.host,
@@ -131,6 +152,9 @@ class HeartbeatResult:
             },
             "evidence": self.evidence,
         }
+        if self.does_not_distinguish is not None:
+            out["does_not_distinguish"] = self.does_not_distinguish
+        return out
 
 
 def _probe_script(log: str, lock: str) -> str:

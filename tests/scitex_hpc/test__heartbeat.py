@@ -489,6 +489,27 @@ def test_no_failure_path_ever_yields_stopped(label):
     assert result.verdict != STOPPED
 
 
+@pytest.mark.parametrize("label", sorted(UNKNOWN_CASES))
+def test_every_unknown_says_what_it_fails_to_distinguish(label):
+    # Arrange: `reason` says why we answered; this says what the answer does
+    # NOT rule out. Swept over the same registry as the STOPPED invariant so a
+    # newly registered failure path is checked for both or neither.
+    kw, _ = UNKNOWN_CASES[label]
+    # Act
+    payload = check(**kw)[0].to_dict()
+    # Assert
+    assert "not observed" in payload["does_not_distinguish"]
+
+
+def test_alive_verdict_omits_the_disclaimer_key():
+    # Arrange: a verdict that DID decide carries no hedge to undermine it.
+    kw: dict = {}
+    # Act
+    payload = check(**kw)[0].to_dict()
+    # Assert
+    assert "does_not_distinguish" not in payload
+
+
 def test_recycled_pid_is_unknown_not_alive():
     # Arrange
     kw = {"pid_cmdline": "/usr/bin/python3 something-else.py", "match": "bridge"}

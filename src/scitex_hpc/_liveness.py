@@ -122,8 +122,27 @@ class LivenessResult:
     def is_dead(self) -> bool:
         return self.verdict == DEAD
 
+    @property
+    def does_not_distinguish(self) -> str | None:
+        """What this verdict FAILS to mean — stated, not left to be inferred.
+
+        ``reason`` says why the probe answered as it did. It does not say what
+        the answer fails to rule out, and that is the half a reader acts on.
+        Derived rather than stored on purpose: a new UNKNOWN call site cannot
+        forget to set what it never sets.
+        """
+        if self.verdict != UNKNOWN:
+            return None
+        return (
+            "UNKNOWN IS NOT A NEGATIVE RESULT. This is the same output a "
+            "HEALTHY job produces when the probe could not reach the host or "
+            "could not read the job's state, so it does not distinguish 'not "
+            "running' from 'not observed'. DEAD is earned by positive "
+            "evidence and is never inferred from this."
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "verdict": self.verdict,
             "reason": self.reason,
             "host": self.host,
@@ -134,6 +153,9 @@ class LivenessResult:
             },
             "evidence": self.evidence,
         }
+        if self.does_not_distinguish is not None:
+            out["does_not_distinguish"] = self.does_not_distinguish
+        return out
 
 
 def _unknown(reason: str, **kw: Any) -> LivenessResult:

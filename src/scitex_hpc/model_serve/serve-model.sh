@@ -34,13 +34,25 @@
 # $DISCD/*-endpoint.json to see what is being served instead of hardcoding a
 # port. That is what makes "switch between models" real rather than manual.
 #
-# PORT ALLOCATIONS ARE CENTRAL, IN THE CONFS, AND MUST NOT COLLIDE:
-#   qwen36-35b-a3b   vllm 8765  litellm 4000  tunnel 18770
-#   gpt-oss-120b     vllm 8766  litellm 4001  tunnel 18771
-#   muse-glimmer-30b vllm 8767  litellm 4002  tunnel 18772
-#   RESERVED, DO NOT USE: 18765 -> the `codex` provider
-#   (src/scitex_agent_container/config/_provider_registry.py:43). Binding it
-#   would make any codex-configured agent silently reach a local model.
+# PORT ALLOCATIONS ARE CENTRAL, IN THE CONFS, AND MUST NOT COLLIDE.
+# THE CONFS ARE THE ONLY RECORD OF THEM. There used to be a table here listing
+# each model's vllm/litellm/tunnel ports. It is deliberately gone: on
+# 2026-08-16 it still described qwen36-35b-a3b, gpt-oss-120b and
+# muse-glimmer-30b -- three models that had stopped running -- and named none
+# of the four engines actually serving. It was one of three descriptive layers
+# that had rotted (job names and the discovery directory were the others),
+# while the confs stayed correct throughout.
+# The confs stayed correct because THIS SCRIPT READS THEM. They are
+# load-bearing; a comment is not. A record nothing reads will rot, so the fix
+# is not to update this table but to not keep one:
+#   grep -H '^\(VLLM\|LITELLM\|TUNNEL\)_PORT=' $CONFD/*.conf
+#
+# RESERVED, DO NOT USE: 18765 -> the `codex` provider
+# (src/scitex_agent_container/config/_provider_registry.py:43). Binding it
+# would make any codex-configured agent silently reach a local model.
+# This one stays written down because it is NOT derivable from the confs --
+# it is a constraint imposed from outside this script, and the confs record
+# only what we did allocate, never what we must not.
 # ---------------------------------------------------------------------------
 set -u
 
@@ -82,6 +94,25 @@ REAL_HOME=${HOME:-/home/ywatanabe}
 
 _resubmit() { echo "[serve] walltime; resubmitting $KEY" >&2; sbatch --job-name="$KEY-serve" "$0" "$KEY"; }
 trap _resubmit USR1
+
+# ---- Withdraw the discovery entry when this engine stops.
+# The header above tells consumers to enumerate $DISCD/*-endpoint.json rather
+# than hardcode a port, which makes that directory the sanctioned answer to
+# "what is served where". It was written on ready and never removed, so a
+# stopped model left a record indistinguishable from a live one.
+# Measured 2026-08-16: 8 entries, 4 of them describing models that had not run
+# for days -- a 50% false-positive rate for anyone following the documented
+# protocol. The four live entries were correct, so the mechanism worked;
+# nothing withdrew an entry, and write-on-start without remove-on-stop
+# guarantees that outcome given time.
+# A trap cannot cover SIGKILL or a node failure, so this is necessary and not
+# sufficient: the record also carries job_id, letting a reader confirm the
+# owning allocation still exists rather than trusting the file's presence.
+_withdraw_discovery() {
+  [ -n "${DISC:-}" ] && [ -f "$DISC" ] || return 0
+  rm -f "$DISC" && echo "[serve] withdrew $DISC" >&2
+}
+trap _withdraw_discovery EXIT
 
 # ---- CUDA / venv. Absolute paths captured BEFORE any cd: a cd after a module
 # ---- load silently wipes the module PATH on this cluster.
@@ -180,9 +211,39 @@ while true; do
   done
 
   if [ "$ready" = yes ]; then
-    printf '{"node":"%s","litellm_port":%s,"vllm_port":%s,"tunnel_port":%s,"bind":"0.0.0.0","model":"%s","key":"sk-clew-local","tp":%s,"max_model_len":%s,"updated":"%s"}\n' \
+    # THE JOB NAMES ITSELF AFTER WHAT IT IS ACTUALLY SERVING.
+    # _resubmit already submits as "$KEY-serve", so a job that resubmits is
+    # named correctly. The drift comes from the OTHER path: repointing a live
+    # allocation with `srun --overlap` (the technique for swapping models
+    # without releasing a node) renames nothing, so the allocation keeps the
+    # name of whatever it served first.
+    # Measured 2026-08-16: all three serving jobs were named for models that
+    # had stopped days earlier -- "muse-serve-permanent" and
+    # "gptoss-serve-permanent" were both serving qwen38-27b. That naming led to
+    # a proposal to release a LIVE allocation (irreversible here) and to two
+    # false claims about a dependency on an already-stopped model.
+    # Naming happens HERE, next to the discovery write, because this is the
+    # point where the model is proven up: an identity published before /health
+    # answers would be a claim rather than an observation.
+    #
+    # THE NAME IS BUILT FROM SERVED_NAME AND THE NODE, NOT FROM $KEY, AND THAT
+    # IS LOAD-BEARING. One allocation can hold SEVERAL engines: gpgpu178 runs
+    # keys qwen38-27b and qwen38-27b-b as two `srun --overlap` steps sharing
+    # ONE job id. A $KEY-derived name would make those two steps write
+    # different names to the same job -- last-write-wins, and the name flaps
+    # between them. Every engine in one allocation agrees on SERVED_NAME and on
+    # the node, so every step computes the SAME string and the update is
+    # idempotent no matter how many replicas run or what order they finish in.
+    JOB_NAME="$SERVED_NAME-serve-${NODE%%.*}"
+    if [ -n "${SLURM_JOB_ID:-}" ] && command -v scontrol >/dev/null 2>&1; then
+      if ! scontrol update JobId="$SLURM_JOB_ID" JobName="$JOB_NAME" >/dev/null 2>&1; then
+        echo "[serve] WARNING: could not rename job $SLURM_JOB_ID to $JOB_NAME;" \
+             "its name may not describe what it serves" >&2
+      fi
+    fi
+    printf '{"node":"%s","litellm_port":%s,"vllm_port":%s,"tunnel_port":%s,"bind":"0.0.0.0","model":"%s","key":"sk-clew-local","tp":%s,"max_model_len":%s,"job_id":"%s","updated":"%s"}\n' \
       "$NODE" "$LITELLM_PORT" "$VLLM_PORT" "$TUNNEL_PORT" "$SERVED_NAME" "$TP" "$MAX_MODEL_LEN" \
-      "$(date -u +%FT%TZ)" > "$DISC"
+      "${SLURM_JOB_ID:-unknown}" "$(date -u +%FT%TZ)" > "$DISC"
     if [ -z "$TUNNEL_PID" ] || ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
       _tunnel_supervisor & TUNNEL_PID=$!
       echo "[serve] tunnel supervisor pid=$TUNNEL_PID (remote 127.0.0.1:$TUNNEL_PORT on compute-04)"

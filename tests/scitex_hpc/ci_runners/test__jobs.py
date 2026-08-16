@@ -22,7 +22,7 @@ def test_jobs_returns_the_ci_supervisor_watch_spec():
     # Act
     names = [spec.name for spec in jobs()]
     # Assert
-    assert "scitex-hpc.ci-supervisor-watch" in names
+    assert "scitex-hpc-ci-supervisor-watch" in names
 
 
 def test_jobs_spec_runs_the_watch_command():
@@ -42,4 +42,4 @@ def test_jobs_includes_the_inode_quota_warn_spec():
     # Act
     names = [spec.name for spec in jobs()]
     # Assert
-    assert "scitex-hpc.inode-quota-warn" in names
+    assert "scitex-hpc-inode-quota-warn" in names

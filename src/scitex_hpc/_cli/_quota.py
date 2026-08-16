@@ -4,7 +4,7 @@ Subcommands:
 
   * ``validate`` — ``df -i`` the tracked filesets and alarm (exit 1) if any is
     at/over the threshold (default 90%). The command the federated
-    ``scitex-hpc.inode-quota-warn`` cron JobSpec runs. The older ``check``
+    ``scitex-hpc-inode-quota-warn`` cron JobSpec runs. The older ``check``
     spelling stays as a hidden, warning alias for one minor-version cycle.
 
 Cluster-agnostic (plain ``df -i``); no hostnames baked in beyond the

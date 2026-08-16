@@ -225,9 +225,19 @@ while true; do
     # Naming happens HERE, next to the discovery write, because this is the
     # point where the model is proven up: an identity published before /health
     # answers would be a claim rather than an observation.
+    #
+    # THE NAME IS BUILT FROM SERVED_NAME AND THE NODE, NOT FROM $KEY, AND THAT
+    # IS LOAD-BEARING. One allocation can hold SEVERAL engines: gpgpu178 runs
+    # keys qwen38-27b and qwen38-27b-b as two `srun --overlap` steps sharing
+    # ONE job id. A $KEY-derived name would make those two steps write
+    # different names to the same job -- last-write-wins, and the name flaps
+    # between them. Every engine in one allocation agrees on SERVED_NAME and on
+    # the node, so every step computes the SAME string and the update is
+    # idempotent no matter how many replicas run or what order they finish in.
+    JOB_NAME="$SERVED_NAME-serve-${NODE%%.*}"
     if [ -n "${SLURM_JOB_ID:-}" ] && command -v scontrol >/dev/null 2>&1; then
-      if ! scontrol update JobId="$SLURM_JOB_ID" JobName="$KEY-serve" >/dev/null 2>&1; then
-        echo "[serve] WARNING: could not rename job $SLURM_JOB_ID to $KEY-serve;" \
+      if ! scontrol update JobId="$SLURM_JOB_ID" JobName="$JOB_NAME" >/dev/null 2>&1; then
+        echo "[serve] WARNING: could not rename job $SLURM_JOB_ID to $JOB_NAME;" \
              "its name may not describe what it serves" >&2
       fi
     fi

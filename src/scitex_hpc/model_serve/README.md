@@ -70,8 +70,20 @@ qwen38-27b). That naming led to a proposal to release a **live** allocation,
 which is irreversible here, and to two false claims about a dependency on an
 already-stopped model.
 
-The convention was not invented for the fix — the script already declared
-`$KEY-serve` at line 83. It is now applied on the path that skipped it.
+The name is `<served-name>-serve-<node>`, e.g. `qwen38-27b-serve-spartan-gpgpu178`.
+
+**It is deliberately not built from `$KEY`,** even though `_resubmit` uses
+`$KEY-serve` and that was the obvious thing to reuse. One allocation can hold
+several engines: gpgpu178 runs keys `qwen38-27b` and `qwen38-27b-b` as two
+`srun --overlap` steps sharing **one** job id. A `$KEY`-derived name would have
+those two steps write *different* names to the same job — last-write-wins, and
+the name flaps depending on which finished loading last.
+
+Every engine in one allocation agrees on `SERVED_NAME` and on the node, so
+every step computes the same string and the update is idempotent regardless of
+how many replicas run or in what order they become ready. Choosing the name
+from what the steps **share** rather than from what distinguishes them is what
+makes concurrent writers safe here.
 
 **2. The discovery entry is now withdrawn on exit.** It was written on ready
 and never removed, so a stopped model left a record indistinguishable from a

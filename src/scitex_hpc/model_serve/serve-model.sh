@@ -92,7 +92,42 @@ LITELLM_CFG=$BASE/litellm-$KEY.yaml
 # known_hosts); pointing it at the cache home breaks it silently.
 REAL_HOME=${HOME:-/home/ywatanabe}
 
-_resubmit() { echo "[serve] walltime; resubmitting $KEY" >&2; sbatch --job-name="$KEY-serve" "$0" "$KEY"; }
+# ---- Resubmit from the CANONICAL script, never from "$0".
+# This used to be `sbatch "$0"`. Inside a batch job $0 is the node-local SPOOL
+# COPY (/var/spool/slurm/job<ID>/slurm_script), so every resubmission carried a
+# frozen snapshot of the script as it was when that chain started -- immune to
+# every later fix, and naming a path that ceases to exist when the parent ends.
+#
+# Measured 2026-08-16, and it had already cost us: job 29265170, the ONLY
+# successor allocation covering the 08-20 expiry, still ran the Qwen3.6 stack
+# on ports 8765/4000 that no consumer routes to. Its Command= was
+# /var/spool/slurm/job28939737/slurm_script -- a chain begun before the qwen38
+# migration and carried forward untouched ever since. Its preflight PASSED, so
+# it would have started cleanly and held two H100s for seven days serving a
+# model nobody could reach.
+#
+# A self-healing mechanism that heals into the past is worse than one that does
+# not heal: it keeps producing confident, healthy-looking, obsolete jobs.
+#
+# REAL_HOME (not $HOME) because HOME is redirected to a node-local cache below,
+# and this trap fires long after that.
+SERVE_SELF=$REAL_HOME/serve-model.sh
+_resubmit() {
+  echo "[serve] walltime; resubmitting $KEY" >&2
+  # Prefer the canonical script so the successor picks up the CURRENT code.
+  # Fall back to $0 rather than dying: losing the chain means losing a
+  # permanent allocation, which on this cluster we cannot get back (no admin
+  # escalation). A stale successor beats no successor -- but say so loudly,
+  # because a silent fallback is how this defect survived in the first place.
+  if [ -r "$SERVE_SELF" ]; then
+    sbatch --job-name="$KEY-serve" "$SERVE_SELF" "$KEY"
+  else
+    echo "[serve] WARNING: $SERVE_SELF unreadable; resubmitting the SPOOL COPY" \
+         "\"$0\". The successor will run this job's frozen script and will NOT" \
+         "include any later fix. Restore $SERVE_SELF and resubmit by hand." >&2
+    sbatch --job-name="$KEY-serve" "$0" "$KEY"
+  fi
+}
 trap _resubmit USR1
 
 # ---- Withdraw the discovery entry when this engine stops.

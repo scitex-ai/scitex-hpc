@@ -20,7 +20,17 @@ jobs:
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_PERSONAL_ACCESS_TOKEN }}
+          # TWO NAMES, and conflating them is the easy mistake:
+          #   PERSONAL_ACCESS_TOKEN      the ENV VAR   <- what the action reads
+          #   GH_PERSONAL_ACCESS_TOKEN   the SECRET    <- what PS-168 inspects
+          # This was `secrets.CLA_PERSONAL_ACCESS_TOKEN`, and NO repo holds a
+          # secret by that name -- it came from the 2026-05-18 workflow template
+          # (33ee90ff), so it interpolated to EMPTY and the action treated '' as
+          # absent (isPersonalAccessTokenPresent). The `allowlist` below
+          # short-circuits before the PAT is needed, so the breakage was
+          # invisible to us and would have surfaced only for the first OUTSIDE
+          # contributor -- the people this gate exists for.
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: "signatures/cla.json"
           path-to-document: "https://github.com/ywatanabe1989/scitex-hpc/blob/main/CLA.md"

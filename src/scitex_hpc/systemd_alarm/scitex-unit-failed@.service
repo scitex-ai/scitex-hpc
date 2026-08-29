@@ -1,0 +1,29 @@
+[Unit]
+# OnFailure alarm target for timer-driven oneshots. scitex-hpc, 2026-08-29.
+#
+# WHY: ten user units on this host are Type=oneshot with Restart=none, and
+# before today NONE declared OnFailure=. A supervised service gets a failure
+# signal for free by exhausting StartLimitBurst; a timer-driven oneshot gets
+# nothing at all -- it fails, systemd records Result=exit-code, and no human
+# is ever told. Measured cost: index-lock-census could not fire its alarm for
+# two weeks, and the warning about that went to a journal holding zero lines.
+#
+# %i is the failing unit, supplied by OnFailure=scitex-unit-failed@%n.service
+# NOTE %n ALREADY INCLUDES .service, so the live instance is named
+# scitex-unit-failed@<unit>.service.service. Querying the single-suffix name
+# returns a nonexistent unit whose DEFAULTS (Result=success, ExecMainStatus=0)
+# are indistinguishable from a successful run. The discriminator is
+# ExecMainStartTimestamp: empty means it never ran.
+Description=Alarm that %i failed
+
+[Service]
+Type=oneshot
+# ABSOLUTE PATH via the login-shell wrapper. A systemd --user unit gets
+# PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin and inherits no
+# module load, so a bare command name resolves to nothing and scitex's
+# python3.11 exits 127. Both measured on this host.
+ExecStart=/home/ywatanabe/.local/bin/scitex-ci-alarm "[ALARM] systemd unit %i FAILED on spartan-login1. Inspect: systemctl --user status %i ; journalctl --user -u %i -n 50" -t "unit failed: %i" -l error
+# MEASURED: a real send takes ~14-40s (the backend chain walks audio -> emacs
+# -> ...) and DOES deliver ("Notification sent", success:true, rc=0). Bounded
+# so a hung backend cannot wedge the alarm; generous enough not to trip.
+TimeoutStartSec=180

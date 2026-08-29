@@ -1,0 +1,16 @@
+[Unit]
+Description=Watch the dotfiles SSoT gitconfig for CI-runner safe.directory accumulation
+Documentation=https://github.com/scitex-ai/scitex-hpc
+# A Type=oneshot under a .timer has no supervision, so a failure reaches nobody
+# without this. See src/scitex_hpc/systemd_alarm/.
+OnFailure=scitex-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+# exit 1 == drift present. That is the monitor WORKING, not failing. exit 2 ==
+# unreadable target (a failed look). exit 3 == no alarm sink, i.e. the monitor
+# cannot report and is genuinely broken. Only 0 and 1 are success.
+SuccessExitStatus=0 1
+ExecStart=%h/.scitex/hpc/scripts/gitconfig-drift-watch.sh
+Nice=19
+IOSchedulingClass=idle

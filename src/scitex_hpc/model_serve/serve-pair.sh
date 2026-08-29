@@ -56,7 +56,20 @@ SELF=$REAL_HOME/serve-pair.sh
 # node-local spool copy, so resubmitting it freezes the script forever. That
 # defect left job 29265170 still serving Qwen3.6 on unreachable ports months
 # after the qwen38 migration. See serve-model.sh's _resubmit for the full note.
+#
+# RESUBMIT AT MOST ONCE. Until 2026-08-29 this was implicit: the trap ended the
+# job (the bare trailing `wait` fell through), so a second USR1 had nothing left
+# to interrupt. Now that the script survives the signal and keeps serving to
+# walltime, a repeated USR1 would call sbatch again and queue a SECOND successor
+# for the same pair -- two jobs competing for GPUs on a queue where one already
+# waits ~30h. The guard is the price of the fix and belongs with it.
+_RESUBMITTED=0
 _resubmit() {
+  if [ "$_RESUBMITTED" -ne 0 ]; then
+    echo "[pair] USR1 again; successor already submitted, ignoring" >&2
+    return 0
+  fi
+  _RESUBMITTED=1
   echo "[pair] walltime; resubmitting $KEY_A + $KEY_B" >&2
   if [ -r "$SELF" ]; then
     sbatch --job-name="${SLURM_JOB_NAME:-qwen-serve}" "$SELF" "$KEY_A" "$KEY_B"
@@ -90,4 +103,33 @@ _spawn "$KEY_B" &
 PID_B=$!
 
 echo "[pair] supervising pids $PID_A ($KEY_A) and $PID_B ($KEY_B); holding"
-wait
+
+# RE-ENTER THE WAIT. A bare trailing `wait` ENDS THIS JOB THE MOMENT THE USR1
+# TRAP FIRES, an hour before walltime.
+#
+# `wait` is interrupted by a delivered signal and does NOT resume by itself.
+# With `wait` as the final statement the sequence was:
+#   USR1 at T-3600 -> wait returns -> _resubmit runs (correctly, sbatch fires)
+#   -> control falls off the end of the script -> ALLOCATION DIES AT T-3600
+#
+# Two costs, both measured on this fleet 2026-08-29:
+#   1. ONE HOUR of serving thrown away every generation. The successor is
+#      already queued by then, but it waits for a GPU -- observed 30h11m on
+#      29644207 -- so the hour is pure additional outage, not a handover.
+#   2. The script's exit status becomes wait's 128+10 = 138, so a job whose
+#      handoff SUCCEEDED is recorded FAILED. Anyone auditing serve reliability
+#      by sacct state -- the obvious way -- reads a working mechanism as a
+#      failure. Four such jobs read that way before this was understood.
+#
+# Reproduced directly rather than inferred from the bash manual: background
+# supervisors + bare trailing `wait` + `kill -USR1` prints
+# "FELL THROUGH past wait -- script is ending".
+#
+# The loop below keeps both engines serving until SLURM's own walltime kill,
+# which is the honest end for a job that served its full allocation. It is
+# guarded on the supervisors being alive rather than being `while true`, so if
+# both _spawn loops ever do exit this terminates instead of spinning on a
+# `wait` that returns 0 immediately.
+while kill -0 "$PID_A" 2>/dev/null || kill -0 "$PID_B" 2>/dev/null; do
+  wait
+done

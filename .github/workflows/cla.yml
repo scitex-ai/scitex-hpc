@@ -28,13 +28,33 @@ name: CLA Assistant
 #      Pinning takes reusable updates deliberately. Bump the SHA after READING
 #      the diff; do not restore `@main` to avoid the bump.
 #
-# WHAT THIS DOES NOT FIX
-# ----------------------
-# The callee's jobs still declare `runs-on: [self-hosted, Linux, X64, spartan-cpu]`
-# (scitex-ai/.github .github/workflows/cla.yml, both jobs, verified 2026-08-02), so
-# CLA code still executes on persistent shared university hardware. That is the
-# callee's to change and is tracked separately — this file cannot fix it, and
-# narrowing what we hand over is worth doing regardless of the outcome there.
+# THE RUNNER, WHICH THIS PIN BUMP IS ABOUT
+# ---------------------------------------
+# This file used to record that the callee's jobs "still declare
+# `runs-on: [self-hosted, Linux, X64, spartan-cpu]` ... so CLA code still
+# executes on persistent shared university hardware". That was true at the old
+# pin and is NOT true at this one.
+#
+#   pin 1c593985  main@2026-07-31   both jobs hard-coded to the Spartan pool
+#   pin 57e2e772  main@2026-08-11   runs-on: ${{ fromJSON(inputs.runs_on) }}
+#                                   default '["ubuntu-latest"]'
+#
+# The callee's own words for why the default inverted: "DEFAULT IS ubuntu-latest
+# BECAUSE THIS JOB IS OUTSIDER-TRIGGERABLE ... A compromise on an ephemeral
+# hosted VM costs one disposable runner; on the pool it costs the fleet
+# credential."
+#
+# We pass no `runs_on`, deliberately, so we take that default. This repo has no
+# speed case for the pool here — CLAssistant measured at 8s.
+#
+# AND THIS IS WHY THE PIN NEEDED A BUMP RATHER THAN NOTHING: a SHA-pinned
+# consumer does not observe upstream fixes. The callee gained the `runs_on`
+# input on 2026-08-05 and the hosted default on 2026-08-11; this caller sat on
+# 07-31 code through both and would have kept executing on Spartan
+# indefinitely, with every run green. The callee measured the same shape from
+# its side: "of 17 consumer repos, 17 pass nothing and inherit it. The escape
+# hatch existed for five days and nobody used it, because a default is not a
+# decision anyone makes -- it is one they never see."
 
 on:
   issue_comment:
@@ -53,7 +73,7 @@ jobs:
     # CLAssistant posts its commit status via a raw Statuses-API call with a
     # hardcoded context "CLAssistant" (not tied to this job id) — no
     # required-status-check rename needed.
-    uses: scitex-ai/.github/.github/workflows/cla.yml@1c5939858918fc83988955df15af3340da5c8fb1 # main@2026-07-31
+    uses: scitex-ai/.github/.github/workflows/cla.yml@57e2e77212cc00ffbdc2c2554529d7a0cfa83b80 # main@2026-08-11
     # owner_allowlist overridden: this repo's allowlist has an extra
     # "LLEmacs" entry beyond the reusable workflow's "bot*,ywatanabe1989" default.
     # Taking the default would start demanding a CLA signature from an

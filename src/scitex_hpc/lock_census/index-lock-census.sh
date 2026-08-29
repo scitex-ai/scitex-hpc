@@ -109,29 +109,78 @@ fi
 # tree_monitor: a MISSING path might never have existed, so absence needs a
 # baseline — but a PRESENT lock is unambiguous evidence on its own.
 #
-# LOCK_CENSUS_DRYRUN=1 suppresses the card write. Copied from tree_monitor and
-# for its stated reason: exercising an alarm branch without it puts a real card
-# on the shared fleet board, which someone then has to hunt down and delete. An
-# alarm path that cannot be rehearsed safely will either go untested or teach
-# everyone to ignore its cards.
-if [ "$locked" -gt 0 ] && { [ "$PREV" = "none" ] || [ "$PREV" -eq 0 ] 2>/dev/null; }; then
-  if [ "${LOCK_CENSUS_DRYRUN:-0}" = "1" ]; then
-    echo "[lock-census] DRYRUN alarm suppressed; would have carded $locked locked repo(s)" >&2
-  elif command -v scitex-todo >/dev/null 2>&1; then
-    SCITEX_TODO_AGENT_ID=scitex-hpc scitex-todo add \
-      "spartan-index-lock-recurrence-$(date -u +%Y%m%dT%H%M%SZ)" \
-      "[ALARM] stale .git/index.lock returned on $host — $locked repo(s), evidence captured" \
-      --status blocked --blocker operator-decision \
-      --assignee scitex-hpc --project scitex-hpc --priority 1 \
-      --task "$(printf 'The index.lock census found %s locked repo(s) of %s scanned on %s.\n\nDO NOT CLEAR THEM YET. The mtimes ARE the evidence: the 2026-08-15 remediation cleared 59 locks and destroyed the only data that could identify the recurring cause. Correlate first.\n\nEvidence, already captured, epoch seconds:\n  %s\n\nThe correlation test: compare mtime_epoch against `sacct --format=End` in EPOCH SECONDS, computed ON Spartan. A bare 10-digit epoch is secret-shaped and gets redacted in an agent transcript, so return the derived verdict rather than the numbers.\n\nParent card: spartan-85-of-139-repos-write-locked-by-stale-index-lock-20260815\n' \
-               "$locked" "$scanned" "$host" "$LOG")" \
-      >/dev/null 2>&1 && echo "[lock-census] alarm card created" >&2 \
-                      || echo "[lock-census] WARN alarm card FAILED — evidence is still in $LOG" >&2
+# LOCK_CENSUS_DRYRUN=1 suppresses the SEND, never the sink RESOLUTION. That
+# distinction is the whole point of the 2026-08-29 rewrite below.
+
+# --- Alarm sink, resolved by ABSOLUTE PATH on EVERY run ------------------------
+# The previous version guarded the alarm with `command -v scitex-todo` and, on
+# failure, warned to stderr. Every part of that was wrong, measured 2026-08-29:
+#
+#   1. A systemd --user unit gets PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:
+#      /usr/sbin -- verified with `systemd-run --user`. NO scitex entry point is
+#      on it. So `command -v <anything scitex>` is FALSE under systemd no matter
+#      what it is called or whether it is installed. The guard could not pass.
+#   2. `scitex-todo` is the RETIRED name; the current package reads only
+#      SCITEX_CARDS_AGENT_ID. The branch exported the old variable.
+#   3. scitex_cards is not installed on this host at all (ModuleNotFoundError),
+#      so no card CLI can work here regardless. Notification is the only rail.
+#   4. The else-branch warned to stderr -> journal, and this unit's journal has
+#      held ZERO lines for fourteen days. The warning that the alarm was broken
+#      was itself delivered nowhere.
+#
+# Hence: absolute paths, not PATH lookup; and resolution happens on EVERY run,
+# not only when alarming. A monitor that CANNOT report is broken NOW -- deferring
+# that discovery to the day locks return means discovering it exactly when it is
+# too late to matter. Resolution failure exits 3 (the unit declares
+# SuccessExitStatus=0 1, so 3 renders as a genuine failure).
+#
+# NOTE the remaining gap, stated rather than papered over: a failed unit is
+# visible in `systemctl --user --failed` but still pushes nothing to a human.
+# Wiring OnFailure= is tracked on no-onfailure-anywhere-systemd-failures-reach
+# -nobody-20260816. This change moves the failure from invisible to pullable,
+# which is an improvement and not yet an alarm.
+_resolve_alarm_sink() {
+  _c=""
+  for _c in "${LOCK_CENSUS_ALARM_CMD:-}" "$HOME/.local/bin/scitex-ci-alarm"; do
+    [ -n "$_c" ] && [ -x "$_c" ] && { printf '%s\n' "$_c"; return 0; }
+  done
+  return 1
+}
+
+SINK=$(_resolve_alarm_sink) || SINK=""
+if [ -z "$SINK" ]; then
+  echo "[lock-census] ERROR no alarm sink resolved (tried \$LOCK_CENSUS_ALARM_CMD," >&2
+  echo "[lock-census]       \$HOME/.local/bin/scitex-ci-alarm). Detection cannot be" >&2
+  echo "[lock-census]       reported, so this run is a FAILURE even if 0 locks were" >&2
+  echo "[lock-census]       found. Evidence, if any, is in $LOG" >&2
+  exit 3
+fi
+
+# LOCK_CENSUS_ALARM_SELFTEST=1 sends a real notification and exits. This is the
+# rehearsal the old DRYRUN could not provide: DRYRUN returned before touching the
+# sink, so the one thing that was broken was the one thing it did not exercise.
+if [ "${LOCK_CENSUS_ALARM_SELFTEST:-0}" = "1" ]; then
+  if "$SINK" "[selftest] index-lock-census alarm rail is reachable from $host" \
+             -t "lock-census selftest" -l info; then
+    echo "[lock-census] SELFTEST ok via $SINK" >&2; exit 0
   else
-    echo "[lock-census] WARN scitex-todo unavailable — evidence recorded in $LOG only" >&2
+    echo "[lock-census] SELFTEST FAILED via $SINK" >&2; exit 3
+  fi
+fi
+
+if [ "$locked" -gt 0 ] && { [ "$PREV" = "none" ] || [ "$PREV" -eq 0 ] 2>/dev/null; }; then
+  _msg=$(printf '[ALARM] stale .git/index.lock returned on %s: %s of %s repos locked. DO NOT CLEAR THEM YET -- the mtimes ARE the evidence; the 2026-08-15 remediation cleared 59 locks and destroyed the only data that could identify the recurring cause. Correlate first: compare mtime_epoch against `sacct --format=End` in epoch seconds, computed ON Spartan (a bare 10-digit epoch is secret-shaped and gets redacted in an agent transcript, so return the derived verdict, not the numbers). Evidence: %s' \
+         "$host" "$locked" "$scanned" "$LOG")
+  if [ "${LOCK_CENSUS_DRYRUN:-0}" = "1" ]; then
+    echo "[lock-census] DRYRUN would alarm via $SINK: $_msg" >&2
+  elif "$SINK" "$_msg" -t "index.lock recurrence on $host" -l error; then
+    echo "[lock-census] alarm sent via $SINK" >&2
+  else
+    echo "[lock-census] ERROR alarm SEND FAILED via $SINK — evidence is in $LOG" >&2
+    exit 3
   fi
 elif [ "$locked" -gt 0 ]; then
-  echo "[lock-census] locks still present (prev=$PREV); already alarmed, not re-carding" >&2
+  echo "[lock-census] locks still present (prev=$PREV); already alarmed, not re-sending" >&2
 fi
 
 # exit 1 == locks present. That is the monitor WORKING, not failing; the unit

@@ -75,10 +75,7 @@ def book_supervisor_cmd(
       $ scitex-hpc ci-runners book-supervisor --confirm
     """
     fleet = _common.discover_fleet(host, ci_base, tuple(exclude))
-    active = fleet.active()
-    if not active:
-        click.echo(f"no runners found under {ci_base}", err=True)
-        sys.exit(2)
+    active = _common.require_active_fleet(fleet, ci_base)
     hold_body = build_supervisor_hold_body(fleet)
     cfg = JobConfig(
         project=lease_name,
@@ -199,10 +196,7 @@ def exec_supervisor_cmd(
         fleet.toolcache = toolcache
     if work_root is not None:
         fleet.work_root = work_root
-    active = fleet.active()
-    if not active:
-        click.echo(f"no runners found under {ci_base}", err=True)
-        sys.exit(2)
+    active = _common.require_active_fleet(fleet, ci_base)
     hold_body = build_supervisor_hold_body(fleet)
     srun_cmd = build_overlap_srun_command(overlap_jobid)
     if not confirm:

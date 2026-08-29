@@ -116,6 +116,51 @@ def test_no_runners_exits_2(capsys):
     assert rc == 2 and "no runners" in err
 
 
+def test_book_supervisor_no_runners_exits_2_naming_ci_base(capsys):
+    # Arrange — an empty FleetSpec (e.g. ci_base resolved to the wrong dir,
+    # or the fleet's naming convention isn't one parse_runner_dirs knows).
+    fleet = FleetSpec(ci_base=CI_BASE, runners=[])
+    # Act
+    with _fake_discover(fleet):
+        rc = main(["ci-runners", "book-supervisor"])
+    # Assert — fails loudly and names the base it searched, rather than
+    # reporting a dry-run "plan" for zero runners.
+    err = capsys.readouterr().err
+    assert rc == 2 and "no runners" in err and CI_BASE in err
+
+
+def test_show_monitor_no_runners_exits_2_naming_ci_base(capsys):
+    # Arrange — an EMPTY FleetSpec. Before this fix, show-monitor happily
+    # emitted a monitor script watching zero runners (always reports "OK").
+    fleet = FleetSpec(ci_base=CI_BASE, runners=[])
+    # Act
+    with _fake_discover(fleet):
+        rc = main(["ci-runners", "show-monitor"])
+    # Assert
+    err = capsys.readouterr().err
+    assert rc == 2 and "no runners" in err and CI_BASE in err
+
+
+def test_watch_no_runners_exits_2_naming_ci_base(capsys):
+    # Arrange — an EMPTY FleetSpec on the actual cron watchdog entrypoint.
+    # Before this fix, `watch` ran a generated monitor script with zero
+    # runners to check, no matter why the fleet was empty. On a real host
+    # with reachable SSH it reports "OK runners=0" and exits 0 — a green
+    # that cannot go red, having supervised nothing. Here (no real SSH)
+    # the downstream script instead fails for an UNRELATED reason (holder
+    # jobid resolution) with an unrelated exit code — which makes the same
+    # point from the other side: without an explicit empty-fleet check,
+    # what "watch" reports depends on incidental downstream conditions
+    # rather than deterministically naming the actual problem.
+    fleet = FleetSpec(ci_base=CI_BASE, runners=[])
+    # Act
+    with _fake_discover(fleet):
+        rc = main(["ci-runners", "watch"])
+    # Assert — fails BEFORE the monitor script is even generated/run
+    err = capsys.readouterr().err
+    assert rc == 2 and "no runners" in err and CI_BASE in err
+
+
 def test_show_register_bakes_scitex_ci_label(capsys):
     # Arrange
     argv = [

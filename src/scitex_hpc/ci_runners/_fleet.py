@@ -13,8 +13,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Install dirs are named ``actions-runner-<name>`` under the CI base dir.
+# Install dirs are named ``actions-runner-<name>`` under the CI base dir —
+# the convention the original 72-runner band-aid used and the one most of
+# the fleet's ~79 legacy per-repo installs still carry.
 RUNNER_DIR_PREFIX = "actions-runner-"
+
+# But it is not the only convention actually on disk. Measured 2026-08-23:
+# a runner installed straight from the upstream tarball (no wrapper script
+# renaming it) is named ``runner-<label>`` — e.g. ``runner-spartan-cpu-03``
+# — and does not start with ``actions-runner-`` at all. Across four
+# candidate CI bases every ``ls`` total was nonzero (146 / 13 / 3 / 388)
+# while every ``RUNNER_DIR_PREFIX`` match was 0: the narrow default wasn't
+# protecting against noise, it was blind to real install dirs.
+#
+# There is no deliberate convention behind the single narrow prefix — it
+# is an assumption that hardened, not a decision (see PR that introduced
+# this constant, and the fleet-ci-runners-missing-work-dir-20260720 /
+# spartan-cpu-runners-offline-payload-pins-dead-jobid-20260823 incidents
+# it left blind). Renaming the on-disk dirs to fit the constant was
+# rejected: it strands paths the LAUNCHER side owns (the keep-alive
+# payload, `.runner` workFolder entries) — a rename that fixes this
+# constant by breaking those files is a transfer, not a fix. Widening the
+# accepted set is the fix; :func:`parse_runner_dirs` already took a
+# ``prefix`` keyword, so the seam existed — only the default was narrow.
+RUNNER_DIR_PREFIXES: tuple[str, ...] = (RUNNER_DIR_PREFIX, "runner-")
 
 # How long the keep-alive loop waits before relaunching a runner whose
 # ``run.sh`` just exited. Long enough to avoid a hot crash-loop hammering
@@ -98,28 +120,39 @@ def parse_runner_dirs(
     listing: str,
     *,
     ci_base: str,
-    prefix: str = RUNNER_DIR_PREFIX,
+    prefix: str | tuple[str, ...] = RUNNER_DIR_PREFIXES,
 ) -> list[RunnerSpec]:
     """Parse a plain ``ls`` listing of the CI base dir into RunnerSpecs.
 
     Accepts the output of ``ls <ci_base>`` (one entry per line). Keeps
-    only entries that start with ``prefix`` and have no extra suffix that
-    marks them as a non-runner artifact (``.log``, ``.wrap.log``, etc.).
-    Deterministic: sorted by name, deduplicated.
+    only entries that start with one of ``prefix`` and have no extra
+    suffix that marks them as a non-runner artifact (``.log``,
+    ``.wrap.log``, etc.). Deterministic: sorted by name, deduplicated.
+
+    ``prefix`` may be a single string (back-compat with earlier callers
+    that pinned one convention) or a tuple of acceptable prefixes — the
+    default, :data:`RUNNER_DIR_PREFIXES`, already covers the two
+    conventions actually seen on disk. Widen it further per-call (e.g. a
+    caller that knows its own fleet's naming) without touching this
+    default.
 
     This deliberately takes a *string* rather than doing the ``ls``
     itself so it is pure and unit-testable; the CLI feeds it a real
     remote listing.
     """
+    prefixes = (prefix,) if isinstance(prefix, str) else tuple(prefix)
     seen: dict[str, RunnerSpec] = {}
     for raw in listing.splitlines():
         entry = raw.strip()
-        if not entry or not entry.startswith(prefix):
+        if not entry:
+            continue
+        matched = next((p for p in prefixes if entry.startswith(p)), None)
+        if matched is None:
             continue
         # Skip sidecar artifacts the old scripts dropped next to the
         # install dirs (e.g. ``actions-runner-foo.wrap.log``). A real
         # install dir name has no dot after the prefix.
-        tail = entry[len(prefix) :]
+        tail = entry[len(matched) :]
         if not tail or "." in tail or "/" in tail:
             continue
         name = tail

@@ -29,8 +29,21 @@ CROSS_PACKAGE_IMPORTS = [
 @pytest.mark.parametrize("module_name", CROSS_PACKAGE_IMPORTS)
 def test_declared_cross_package_dependency_imports(module_name):
     """Importing scitex-hpc's declared cross-package dependency must succeed."""
-    # Arrange
-    pytest.importorskip(module_name)
+    # Arrange -- skip on the ROOT package, hard-import the FULL path.
+    #
+    # This was `pytest.importorskip(module_name)` on the full dotted path, and
+    # that is the exact defect PS-140 exists to catch: a RENAMED submodule
+    # raises ModuleNotFoundError, importorskip swallows it as "peer absent",
+    # the test SKIPS, and the gate reports green -- in the file whose whole
+    # purpose is noticing that a cross-package import broke.
+    #
+    # Skipping on the root keeps the case the skip was written for: a lean
+    # install where the peer is legitimately absent (an optional extra, or a
+    # marker-gated dependency). Dropping the skip entirely would break that.
+    # Once the root imports, the full path must import too -- a missing
+    # SUBMODULE of a package that IS installed is a real breakage, not an
+    # absent peer. Worked example: scitex-ai/scitex-hpc#88.
+    pytest.importorskip(module_name.split(".")[0])
     import importlib
 
     # Act

@@ -8,3 +8,34 @@ audit:
       # Codecov ALWAYS reads `codecov.yml` from repo root — non-negotiable
       # location per codecov.io docs. Whitelist it from PS-103.
       - codecov.yml
+
+  # PS-231 (workflow-duplication) exemption. One site, one stated reason —
+  # a blank reason is rejected by construction and reported at E, so this
+  # paragraph is the mechanism, not decoration.
+  #
+  # rtd-sphinx-build-on-ubuntu-latest.yml is NOT a convertible duplicate of the
+  # org reusable, and PS-231's own BLOCKER 2 names exactly why. Measured
+  # 2026-08-29 in that file:
+  #   line 34      `sphinx-build -W` — warnings fail PRs. A PR GATE the
+  #                build-only org reusable does not provide, so a bare `uses:`
+  #                would lose it.
+  #   lines 45-58  it removes and re-copies docs/sphinx/_build/html into
+  #                src/scitex_hpc/_sphinx_html/, then records and publishes
+  #                that change. hatch packages src/<pkg> WHOLESALE, so the
+  #                bundle SHIPS INSIDE THE WHEEL. Converting keeps building and
+  #                stops publishing: green CI, frozen documentation reaching
+  #                users, nothing anywhere saying so.
+  # Two capabilities the org callee does not have. This leaf's version is
+  # genuinely unique to the leaf, which is the "unless" the rule leaves open.
+  exemptions:
+    PS-231:
+      - path: .github/workflows/rtd-sphinx-build-on-ubuntu-latest.yml
+        line: 0
+        reason: >-
+          Publishes as well as builds. It vendors docs/sphinx/_build/html into
+          src/scitex_hpc/_sphinx_html/ and records it, and hatch packages
+          src/<pkg> wholesale, so that bundle ships inside the wheel; the org
+          reusable is build-only, so converting would silently stop publishing
+          while CI stayed green. It also runs `sphinx-build -W` as a PR gate,
+          which the org build does not. Revisit if the org reusable ever gains
+          a publish step and a warnings-fail input.

@@ -1,5 +1,37 @@
 name: CLA Assistant
 
+# CALLER of the org-provided reusable workflow (PS-231). This file used to
+# re-implement `contributor-assistant/github-action` inline; a local copy does
+# not track fixes made org-side, and this repo proved that the expensive way:
+# its inline copy referenced `secrets.CLA_PERSONAL_ACCESS_TOKEN`, a name NO repo
+# holds, so the PAT interpolated to EMPTY and the action treated '' as absent
+# (isPersonalAccessTokenPresent). The name arrived with the 2026-05-18 workflow
+# template (33ee90ff); nobody here chose it, so nobody ever created a secret to
+# match it. PS-168 went red on main every night from 08-11 and that lint was the
+# only thing that ever said so.
+#
+# TWO NAMES, because conflating them is the easy mistake and the checker says it
+# "sent one reporter to the wrong repository":
+#   PERSONAL_ACCESS_TOKEN      the ENV VAR  <- what the action reads
+#   GH_PERSONAL_ACCESS_TOKEN   the SECRET   <- what PS-168 inspects, and the
+#                                              name the org CLA workflow passes
+#
+# WHY THE CONTEXT NAME SURVIVES THIS CONVERSION, which is PS-231's BLOCKER 1:
+# converting a job to a caller normally renames its published check from
+# `<job>` to `<caller-job> / <callee-job>`. It does not here — CLAssistant posts
+# its commit status through a raw Statuses-API call with a HARDCODED context
+# "CLAssistant", not tied to any job id. Measured separately: `CLAssistant` is
+# not among main's required contexts either (main requires only the three
+# pytest-matrix legs), so this is safe twice over.
+#
+# `runs_on` is deliberately NOT passed. The callee defaults to
+# '["ubuntu-latest"]' because this job is OUTSIDER-TRIGGERABLE:
+# `issue_comment` / `pull_request_target` are unauthenticated on a public repo
+# and are not covered by the fork-PR approval gate, so it must not land on the
+# persistent pool that shares a $HOME with the live fleet credential. That
+# default is where this file's inline job already ran, so the runner does not
+# move.
+
 on:
   issue_comment:
     types: [created]
@@ -13,21 +45,18 @@ permissions:
   statuses: write
 
 jobs:
-  CLAssistant:
-    runs-on: ubuntu-latest
-    steps:
-      - name: CLA Assistant
-        uses: contributor-assistant/github-action@v2.6.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_PERSONAL_ACCESS_TOKEN }}
-        with:
-          path-to-signatures: "signatures/cla.json"
-          path-to-document: "https://github.com/ywatanabe1989/scitex-hpc/blob/main/CLA.md"
-          branch: "cla-signatures"
-          allowlist: bot*,ywatanabe1989
-          custom-allsigned-prcomment: |
-            Thank you for signing the SciTeX CLA. Your contribution can now be reviewed.
-          custom-notsigned-prcomment: |
-            Please sign the [SciTeX CLA](https://github.com/ywatanabe1989/scitex-hpc/blob/main/CLA.md) before your contribution can be merged.
-            Comment `I have read and agree to the SciTeX CLA.` to sign.
+  call:
+    uses: scitex-ai/.github/.github/workflows/cla.yml@57e2e77212cc00ffbdc2c2554529d7a0cfa83b80 # main@2026-08-11
+    # Pinned, not @main: a reusable workflow is remote code that runs with this
+    # repo's permissions. Bump the SHA after READING the diff; do not restore
+    # `@main` to avoid the bump.
+    with:
+      # Equal to the callee's current default. Passed EXPLICITLY anyway, so the
+      # allowlist this repo relies on is visible here rather than inherited —
+      # the callee's own notes record that of 17 consumer repos, 17 passed
+      # nothing and inherited a default none of them had chosen.
+      owner_allowlist: "bot*,ywatanabe1989"
+    secrets:
+      # ONE secret, named. Not `secrets: inherit`, which would forward every
+      # secret this repo holds into a job an outsider can start.
+      GH_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}

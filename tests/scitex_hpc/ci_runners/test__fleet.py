@@ -5,12 +5,24 @@ from __future__ import annotations
 from scitex_hpc.ci_runners import (
     DEFAULT_DIAG_KEEP,
     DEFAULT_RESTART_BACKOFF_SECONDS,
+    RUNNER_DIR_PREFIX,
     FleetSpec,
     RunnerSpec,
     parse_runner_dirs,
 )
 
 CI_BASE = "/data/gpfs/projects/punim0264/ywatanabe/ci"
+
+# A realistic listing from a base that was never wrapped in the
+# ``actions-runner-`` convention — measured 2026-08-23 on Spartan scratch,
+# e.g. ``runner-spartan-cpu-03`` (an upstream tarball install, un-renamed).
+_BARE_RUNNER_LISTING = """\
+runner-spartan-cpu-01
+runner-spartan-cpu-02
+runner-spartan-cpu-03
+runner-spartan-cpu-03.wrap.log
+some-other-dir
+"""
 
 # A realistic ls listing: real install dirs + sidecar artifacts the old
 # band-aids dropped (.wrap.log), which must be filtered out.
@@ -99,3 +111,56 @@ def test_fleet_default_diag_keep():
     keep = fleet.diag_keep
     # Assert
     assert keep == DEFAULT_DIAG_KEEP
+
+
+def test_parse_matches_bare_runner_dash_install_dirs_by_default():
+    # Arrange — a realistically-named runner dir with NO "actions-" wrapper
+    # (measured on Spartan 2026-08-23: runner-spartan-cpu-03). The narrow
+    # RUNNER_DIR_PREFIX = "actions-runner-" default matched none of these.
+    listing = _BARE_RUNNER_LISTING
+    # Act
+    names = [r.name for r in parse_runner_dirs(listing, ci_base=CI_BASE)]
+    # Assert — sidecar .wrap.log and unrelated dirs still excluded
+    assert names == ["spartan-cpu-01", "spartan-cpu-02", "spartan-cpu-03"]
+
+
+def test_parse_still_matches_legacy_actions_runner_prefix_by_default():
+    # Arrange — widening must not regress the existing ~79-runner legacy
+    # convention documented in the package README.
+    listing = _LISTING
+    # Act
+    names = [r.name for r in parse_runner_dirs(listing, ci_base=CI_BASE)]
+    # Assert — unchanged from before the widen
+    assert names == ["figrecipe", "figrecipe-02", "scitex-core", "scitex-hpc"]
+
+
+def test_parse_matches_both_conventions_in_one_listing():
+    # Arrange — a mixed base carrying both the legacy and bare conventions
+    # side by side (the actual shape of a fleet mid-migration).
+    listing = _LISTING + _BARE_RUNNER_LISTING
+    # Act
+    names = {r.name for r in parse_runner_dirs(listing, ci_base=CI_BASE)}
+    # Assert
+    assert names == {
+        "figrecipe",
+        "figrecipe-02",
+        "scitex-core",
+        "scitex-hpc",
+        "spartan-cpu-01",
+        "spartan-cpu-02",
+        "spartan-cpu-03",
+    }
+
+
+def test_parse_prefix_kwarg_still_accepts_a_single_string():
+    # Arrange — back-compat: a caller pinning one exact convention (the
+    # pre-widen call shape) must still work with a bare string, not just
+    # the new default tuple.
+    listing = "actions-runner-only\nrunner-should-be-excluded\n"
+    # Act
+    names = [
+        r.name
+        for r in parse_runner_dirs(listing, ci_base=CI_BASE, prefix=RUNNER_DIR_PREFIX)
+    ]
+    # Assert — narrowed back to just the legacy convention
+    assert names == ["only"]

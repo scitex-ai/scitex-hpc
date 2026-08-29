@@ -116,6 +116,7 @@ def show_monitor_cmd(
       # crontab: */5 * * * * ~/.scitex/ci/monitor.sh >> ~/.scitex/ci/monitor.log 2>&1
     """
     fleet = _common.discover_fleet(host, ci_base, tuple(exclude))
+    _common.require_active_fleet(fleet, ci_base)
     script = build_monitor_script(
         fleet, host=host, lease_name=lease_name, overlap_jobid=overlap_jobid
     )
@@ -153,6 +154,7 @@ def watch_cmd(host, ci_base, exclude, jobid_file):
     import subprocess
 
     fleet = _common.discover_fleet(host, ci_base, tuple(exclude))
+    _common.require_active_fleet(fleet, ci_base)
     script = build_monitor_script(
         fleet,
         host=host,

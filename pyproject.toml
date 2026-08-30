@@ -69,7 +69,34 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Ship the SKILL.md leaf so skill-discovery agents (scitex-dev, etc.)
 # can find it after `pip install scitex-hpc`.
-scitex_hpc = ["_skills/**/*.md", "login_guard/*.sh"]
+#
+# AND ship the OPERATIONAL artifacts -- the shell scripts, systemd units and
+# model configs these subpackages exist to deliver. Measured 2026-08-30 by
+# building a wheel and listing it: without these globs it contained 14 non-.py
+# files (13 skill docs + login-guard.sh) and NOT ONE unit, watch script or
+# alarm sink. So `pip install scitex-hpc` could not stand up the alarm rail
+# that PR #97 had just "version-controlled", nor the hoist-pool watch (#101).
+#
+# This was invisible on Spartan because the install there is EDITABLE: the
+# working tree IS the artifact, so the unshipped files are reachable anyway.
+# Repairing that editable install into a real wheel would have BROKEN the rail
+# -- the packaging bug was masked by the deployment smell, so fixing the smell
+# first would have caused the outage.
+#
+# Matched by TYPE rather than by listing each package, so a future watch
+# subpackage ships without anyone remembering to amend this list. That
+# forgetting is the whole failure mode here. Enforced by
+# tests/scitex_hpc/test__packaging.py.
+scitex_hpc = [
+    "_skills/**/*.md",
+    "**/*.sh",
+    "**/*.service",
+    "**/*.timer",
+    "**/*.conf",
+    # Extensionless on purpose: it is exec'd as a command, not sourced. No
+    # type glob can catch it, which is exactly how it would be dropped again.
+    "systemd_alarm/scitex-ci-alarm",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

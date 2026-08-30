@@ -27,12 +27,25 @@ the check admitting it could not look.
 """
 
 from ._audit import (
+    DEFAULT_STATE_PATH,
     InstallRow,
+    actionable_signature,
     audit_venv,
     editable_installs,
+    read_previous_signature,
     summarize,
+    write_signature,
 )
 
-__all__ = ["InstallRow", "audit_venv", "editable_installs", "summarize"]
+__all__ = [
+    "DEFAULT_STATE_PATH",
+    "InstallRow",
+    "actionable_signature",
+    "audit_venv",
+    "editable_installs",
+    "read_previous_signature",
+    "summarize",
+    "write_signature",
+]
 
 # EOF

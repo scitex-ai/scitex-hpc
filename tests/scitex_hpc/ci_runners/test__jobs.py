@@ -1,45 +1,102 @@
-"""Tests for the scitex_dev.jobs entry-point (CI supervisor watchdog)."""
+#!/usr/bin/env python3
+"""Tests for scitex-hpc's periodic job roster.
+
+Constitution §6 (operator ruling 2026-08-20) retires cron and puts every
+SciTeX periodic job through the supervisor via scitex-dev, with no second
+place. §7 says prefer a mechanical barrier to a written warning, so the
+retirement is asserted here rather than left as a comment someone re-reads.
+
+These build REAL ``scitex_dev.jobs.JobSpec`` objects — the validator is part
+of the contract under test, so a spec that would be rejected by the real
+manager must be rejected here too.
+"""
 
 from __future__ import annotations
 
-import pytest
+from scitex_hpc.ci_runners._jobs import jobs
 
 
-def test_jobs_module_imports_without_scitex_dev():
+def test_the_roster_declares_jobs():
     # Arrange
-    from scitex_hpc.ci_runners import _jobs
-    # Act — the JobSpec import is lazy (inside the callable), so importing
-    # the module must NOT require scitex_dev to be installed.
-    fn = _jobs.jobs
-    # Assert
-    assert callable(fn)
-
-
-def test_jobs_returns_the_ci_supervisor_watch_spec():
-    # Arrange — the real JobSpec dataclass lives in scitex_dev
-    pytest.importorskip("scitex_dev.jobs")
-    from scitex_hpc.ci_runners._jobs import jobs
+    roster = jobs()
     # Act
-    names = [spec.name for spec in jobs()]
-    # Assert
-    assert "scitex-hpc-ci-supervisor-watch" in names
+    count = len(roster)
+    # Assert — a control: an empty roster would satisfy every rule below
+    # while declaring nothing, which is the gate-that-cannot-fail shape
+    assert count > 0
 
 
-def test_jobs_spec_runs_the_watch_command():
-    # Arrange
-    pytest.importorskip("scitex_dev.jobs")
-    from scitex_hpc.ci_runners._jobs import jobs
+def test_no_job_asks_for_a_crontab_entry():
+    # Arrange — cron is RETIRED, not discouraged (operator, 2026-08-20), and
+    # `ecosystem up` now REMOVES the managed crontab block rather than
+    # writing it; a spec asking for one asks for the artifact the reconcile
+    # exists to delete
+    roster = jobs()
     # Act
-    spec = jobs()[0]
-    # Assert — the cron command is the watch entrypoint, not piped bash
-    assert spec.command == "scitex-hpc ci-runners watch"
-
-
-def test_jobs_includes_the_inode_quota_warn_spec():
-    # Arrange
-    pytest.importorskip("scitex_dev.jobs")
-    from scitex_hpc.ci_runners._jobs import jobs
-    # Act
-    names = [spec.name for spec in jobs()]
+    cron_kinds = [j.name for j in roster if j.kind == "cron"]
     # Assert
-    assert "scitex-hpc-inode-quota-warn" in names
+    assert cron_kinds == []
+
+
+def test_every_job_carries_the_package_prefix():
+    # Arrange — `scitex-<pkg>-<name>` is the canonical id (PS-227)
+    roster = jobs()
+    # Act
+    unprefixed = [j.name for j in roster if not j.name.startswith("scitex-hpc-")]
+    # Assert
+    assert unprefixed == []
+
+
+def test_no_job_name_contains_a_dot():
+    # Arrange — systemd_unit_name derives the unit FILENAME verbatim, so a
+    # dot silently installs a SECOND unit instead of adopting the intended one
+    roster = jobs()
+    # Act
+    dotted = [j.name for j in roster if "." in j.name]
+    # Assert
+    assert dotted == []
+
+
+def test_job_names_are_lowercase_hyphenated():
+    # Arrange — hyphens only: no underscores, no uppercase (PS-226)
+    roster = jobs()
+    # Act
+    malformed = [
+        j.name
+        for j in roster
+        if "_" in j.name or j.name != j.name.lower()
+    ]
+    # Assert
+    assert malformed == []
+
+
+def test_every_job_bounds_its_runtime():
+    # Arrange — an unbounded periodic job can overlap itself indefinitely
+    roster = jobs()
+    # Act
+    unbounded = [j.name for j in roster if not j.timeout_sec]
+    # Assert
+    assert unbounded == []
+
+
+def test_the_watchdog_description_states_current_exit_codes():
+    # Arrange — this description said "1 / 2 / 3" while the monitor exited
+    # 10/11/12/13, the same staleness `watch --help` carried until #106
+    roster = jobs()
+    watch = next(j for j in roster if j.name.endswith("ci-supervisor-watch"))
+    # Act
+    detail = watch.description
+    # Assert
+    assert "10" in detail and "1 / 2 / 3" not in detail
+
+
+def test_the_deploy_audit_is_declared_here_too():
+    # Arrange — it was installed by hand as a systemd timer on 2026-08-30;
+    # the declaration is what makes this file the single surface
+    roster = jobs()
+    # Act
+    names = [j.name for j in roster]
+    # Assert
+    assert "scitex-hpc-deploy-audit" in names
+
+# EOF

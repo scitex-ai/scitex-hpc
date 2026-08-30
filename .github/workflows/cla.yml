@@ -73,7 +73,7 @@ jobs:
     # CLAssistant posts its commit status via a raw Statuses-API call with a
     # hardcoded context "CLAssistant" (not tied to this job id) — no
     # required-status-check rename needed.
-    uses: scitex-ai/.github/.github/workflows/cla.yml@57e2e77212cc00ffbdc2c2554529d7a0cfa83b80 # main@2026-08-11
+    uses: scitex-ai/.github/.github/workflows/cla.yml@f5d19f5b7424fcf985137bb6acff54f5d0e11749 # main@2026-08-11
     # owner_allowlist overridden: this repo's allowlist has an extra
     # "LLEmacs" entry beyond the reusable workflow's "bot*,ywatanabe1989" default.
     # Taking the default would start demanding a CLA signature from an

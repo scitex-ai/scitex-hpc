@@ -142,10 +142,21 @@ def watch_cmd(host, ci_base, exclude, jobid_file):
     and exits with the monitor's code:
 
     \b
-      0  fleet healthy
-      1  degraded (some runners down) — alarm fired
-      2  allocation gone / unreachable — alarm fired
-      3  supervisor UNREGISTERED (no holder jobid file) — alarm fired
+      0   fleet healthy
+      10  degraded (some runners down) — alarm fired
+      11  allocation gone / unreachable — alarm fired
+      12  supervisor UNREGISTERED (no holder jobid file) — alarm fired
+      13  runner fileset out of inodes — alarm fired
+
+    \b
+    These are the monitor's own codes, passed through unchanged by
+    ``sys.exit(proc.returncode)``. They start at 10 deliberately: 1-9 are
+    what bash itself returns when the generated script cannot run at all
+    (127 = interpreter/PATH, 126 = not executable, 1 = a shell-level
+    failure), so a two-digit code always means "the monitor RAN and
+    reached a verdict" and a one-digit one always means "it never got
+    that far". A watchdog that cannot tell those apart reports an
+    unreachable cluster and a broken launcher identically.
 
     \b
     Example (federated cron installs this automatically):

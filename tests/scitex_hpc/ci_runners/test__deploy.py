@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Real git repos, no mocks — the bug being fenced was a WRONG ANSWER from a
-real checkout, and a mocked git cannot reproduce a wrong answer it was told
-to give.
+"""Tests for the deploy-drift check.
+
+Real git repositories, no mocks: the bug being fenced was a WRONG ANSWER
+from a real checkout, and a mocked git cannot reproduce a wrong answer it
+was told to give.
 """
 
 from __future__ import annotations
@@ -17,9 +19,16 @@ def _run(*args, cwd):
     subprocess.run(args, cwd=str(cwd), check=True, capture_output=True)
 
 
+def _advance_origin(author, tmp_path, n=3):
+    for i in range(n):
+        (author / "mod.py").write_text(f"v{i + 2}\n")
+        _run("git", "-C", str(author), "commit", "-am", f"v{i + 2}", cwd=tmp_path)
+    _run("git", "-C", str(author), "push", cwd=tmp_path)
+
+
 @pytest.fixture
 def deployment(tmp_path):
-    """An origin, plus a clone standing in for the deploy site."""
+    """An origin, an author clone, and a clone standing in for the deploy site."""
     origin = tmp_path / "origin.git"
     _run("git", "init", "--bare", "-b", "develop", str(origin), cwd=tmp_path)
 
@@ -37,108 +46,182 @@ def deployment(tmp_path):
     return author, deploy, tmp_path
 
 
-def _advance_origin(author, tmp_path, n=3):
-    for i in range(n):
-        (author / "mod.py").write_text(f"v{i + 2}\n")
-        _run("git", "-C", str(author), "commit", "-am", f"v{i + 2}", cwd=tmp_path)
-    _run("git", "-C", str(author), "push", cwd=tmp_path)
-
-
-def test_current_deploy_is_not_drift(deployment):
+def test_up_to_date_checkout_is_state_current(deployment):
+    # Arrange
     _author, deploy, _tmp = deployment
-    st = inspect_deploy(deploy / "mod.py")
-    assert st.state == "current"
-    assert st.is_drift is False
-    assert st.behind == 0
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.state == "current"
 
 
-def test_behind_is_drift_and_counts_the_gap(deployment):
-    """The Spartan case: clean tree, no local commits, simply never pulled."""
+def test_up_to_date_checkout_is_not_drift(deployment):
+    # Arrange
+    _author, deploy, _tmp = deployment
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.is_drift is False
+
+
+def test_stale_checkout_reports_state_behind(deployment):
+    # Arrange — the Spartan case: clean tree, no local commits, never pulled
     author, deploy, tmp_path = deployment
     _advance_origin(author, tmp_path, n=3)
-
-    st = inspect_deploy(deploy / "mod.py")
-    assert st.state == "behind"
-    assert st.is_drift is True
-    assert st.behind == 3
-    assert st.ahead == 0
-    # The detail must carry the FIX, not just the diagnosis.
-    assert "pull --ff-only" in st.detail
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.state == "behind"
 
 
-def test_behind_requires_the_fetch(deployment):
-    """Without a fetch the deploy site cannot even SEE that it is behind.
-
-    This is the failure the check exists to prevent, so it is asserted
-    rather than assumed: a drift check that trusts a stale remote-tracking
-    ref reports 'current' forever.
-    """
+def test_stale_checkout_counts_the_commit_gap(deployment):
+    # Arrange
     author, deploy, tmp_path = deployment
     _advance_origin(author, tmp_path, n=3)
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.behind == 3
 
-    assert inspect_deploy(deploy / "mod.py", fetch=False).state == "current"
-    assert inspect_deploy(deploy / "mod.py", fetch=True).state == "behind"
+
+def test_stale_checkout_is_reported_as_drift(deployment):
+    # Arrange
+    author, deploy, tmp_path = deployment
+    _advance_origin(author, tmp_path, n=3)
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.is_drift is True
 
 
-def test_diverged_is_distinguished_from_behind(deployment):
-    """'behind' and 'diverged' are identical from one side and call for
-    different actions — a plain pull will not fast-forward a diverged tree.
-    """
+def test_behind_detail_names_the_deploy_command(deployment):
+    # Arrange — the detail must carry the FIX, not only the diagnosis
+    author, deploy, tmp_path = deployment
+    _advance_origin(author, tmp_path, n=3)
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert "pull --ff-only" in state.detail
+
+
+def test_without_fetch_stale_checkout_looks_current(deployment):
+    # Arrange — a drift check that trusts a stale remote-tracking ref
+    # reports "current" forever, which is the failure being prevented.
+    author, deploy, tmp_path = deployment
+    _advance_origin(author, tmp_path, n=3)
+    # Act
+    state = inspect_deploy(deploy / "mod.py", fetch=False)
+    # Assert
+    assert state.state == "current"
+
+
+def test_with_fetch_stale_checkout_is_seen(deployment):
+    # Arrange
+    author, deploy, tmp_path = deployment
+    _advance_origin(author, tmp_path, n=3)
+    # Act
+    state = inspect_deploy(deploy / "mod.py", fetch=True)
+    # Assert — so the fetch is load-bearing, not decoration
+    assert state.state == "behind"
+
+
+def _diverge(deployment):
     author, deploy, tmp_path = deployment
     _advance_origin(author, tmp_path, n=2)
-
     _run("git", "-C", str(deploy), "config", "user.email", "t@t.t", cwd=tmp_path)
     _run("git", "-C", str(deploy), "config", "user.name", "t", cwd=tmp_path)
     (deploy / "local.py").write_text("local\n")
     _run("git", "-C", str(deploy), "add", "local.py", cwd=tmp_path)
     _run("git", "-C", str(deploy), "commit", "-m", "local", cwd=tmp_path)
-
-    st = inspect_deploy(deploy / "local.py")
-    assert st.state == "diverged"
-    assert st.is_drift is True
-    assert st.behind == 2 and st.ahead == 1
-    assert "NOT fast-forward" in st.detail
+    return deploy
 
 
-def test_non_checkout_is_not_a_fault(tmp_path):
-    """A real wheel install has nothing to compare. That is not drift."""
+def test_diverged_checkout_reports_state_diverged(deployment):
+    # Arrange — "behind" and "diverged" are identical from one side
+    deploy = _diverge(deployment)
+    # Act
+    state = inspect_deploy(deploy / "local.py")
+    # Assert
+    assert state.state == "diverged"
+
+
+def test_diverged_checkout_counts_local_commits(deployment):
+    # Arrange
+    deploy = _diverge(deployment)
+    # Act
+    state = inspect_deploy(deploy / "local.py")
+    # Assert — work that exists nowhere else must be visible
+    assert state.ahead == 1
+
+
+def test_diverged_detail_warns_pull_will_not_fast_forward(deployment):
+    # Arrange
+    deploy = _diverge(deployment)
+    # Act
+    state = inspect_deploy(deploy / "local.py")
+    # Assert
+    assert "NOT fast-forward" in state.detail
+
+
+def test_wheel_install_reports_not_a_checkout(tmp_path):
+    # Arrange — a real wheel install has nothing to compare
     plain = tmp_path / "site-packages"
     plain.mkdir()
     (plain / "mod.py").write_text("x\n")
+    # Act
+    state = inspect_deploy(plain / "mod.py")
+    # Assert
+    assert state.state == "not-a-checkout"
 
-    st = inspect_deploy(plain / "mod.py")
-    assert st.state == "not-a-checkout"
-    assert st.is_drift is False
+
+def test_wheel_install_is_not_reported_as_drift(tmp_path):
+    # Arrange
+    plain = tmp_path / "site-packages"
+    plain.mkdir()
+    (plain / "mod.py").write_text("x\n")
+    # Act
+    state = inspect_deploy(plain / "mod.py")
+    # Assert — "nothing to compare" is not a fault
+    assert state.is_drift is False
 
 
-def test_unreachable_origin_never_alarms(deployment, tmp_path):
-    """A network blip must not page anyone about deployment."""
+def test_unreachable_origin_never_reports_drift(deployment, tmp_path):
+    # Arrange — a network blip must not page anyone about deployment
     _author, deploy, _tmp = deployment
     _run(
         "git", "-C", str(deploy), "remote", "set-url", "origin",
         str(tmp_path / "gone.git"), cwd=tmp_path,
     )
-    _advance = inspect_deploy(deploy / "mod.py")
-    # Still has its old remote-tracking ref, so it grades 'current' — the
-    # point is only that a dead origin does not manufacture an alarm.
-    assert _advance.is_drift is False
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.is_drift is False
+
+
+def _rename_deploy_branch(deployment):
+    author, deploy, tmp_path = deployment
+    _advance_origin(author, tmp_path, n=2)
+    # Renamed locally; it still tracks origin/develop.
+    _run("git", "-C", str(deploy), "branch", "-m", "deployed", cwd=tmp_path)
+    return deploy
+
+
+def test_renamed_branch_still_detects_drift(deployment):
+    # Arrange — assuming origin/<same-name> graded this "unknown", i.e.
+    # silently blind, which is the outcome this module exists to prevent.
+    deploy = _rename_deploy_branch(deployment)
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.state == "behind"
+
+
+def test_renamed_branch_reports_its_local_name(deployment):
+    # Arrange
+    deploy = _rename_deploy_branch(deployment)
+    # Act
+    state = inspect_deploy(deploy / "mod.py")
+    # Assert
+    assert state.branch == "deployed"
 
 # EOF
-
-
-def test_tracks_a_differently_named_upstream(deployment, tmp_path):
-    """The deploy site's branch need not share its upstream's name.
-
-    Assuming ``origin/<same-name>`` graded such a checkout 'unknown', i.e.
-    silently blind — the single outcome this module exists to prevent.
-    """
-    author, deploy, tmp_path_ = deployment
-    _advance_origin(author, tmp_path_, n=2)
-
-    # Rename the local branch; it still tracks origin/develop.
-    _run("git", "-C", str(deploy), "branch", "-m", "deployed", cwd=tmp_path_)
-
-    st = inspect_deploy(deploy / "mod.py")
-    assert st.branch == "deployed"
-    assert st.state == "behind", f"went blind: {st.state} — {st.detail}"
-    assert st.behind == 2

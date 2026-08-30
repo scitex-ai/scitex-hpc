@@ -17,7 +17,13 @@ import sys
 import click
 
 from ..ci_runners._monitor import _ALARM_FUNC
-from ..deploy_audit import audit_venv, summarize
+from ..deploy_audit import (
+    actionable_signature,
+    audit_venv,
+    read_previous_signature,
+    summarize,
+    write_signature,
+)
 
 #: Two-digit for the same reason the fleet monitor's are: 1-9 are what the
 #: interpreter and shell return when the command could not run at all, so a
@@ -56,7 +62,22 @@ def _fire_alarm(subject: str, body: str) -> None:
     is_flag=True,
     help="Print only the summary line and anything needing action.",
 )
-def audit_deploys_cmd(venv, no_fetch, as_json, quiet):
+@click.option(
+    "--on-change",
+    "on_change",
+    is_flag=True,
+    help="Report only when the actionable set CHANGES since the last run. "
+    "This is what a timer wants: a standing condition that already reached "
+    "someone must not re-page every tick. Without it every run reports the "
+    "current state, which is what a human running it by hand expects.",
+)
+@click.option(
+    "--state-file",
+    "state_file",
+    default=None,
+    help="Where --on-change remembers the previous actionable set.",
+)
+def audit_deploys_cmd(venv, no_fetch, as_json, quiet, on_change, state_file):
     """Audit every EDITABLE install in a venv for deploy drift.
 
     \b
@@ -112,6 +133,29 @@ def audit_deploys_cmd(venv, no_fetch, as_json, quiet):
             f"summary: {counts['_total']} editable install(s), "
             f"{counts['_drift']} drifted, {counts['_broken']} broken"
         )
+
+    # --- transition gate -------------------------------------------------
+    # A standing condition that has already reached a human must not re-page.
+    # The same reasoning as the lock census and the gitconfig watch: alarm on
+    # the CHANGE, never on the state, or the next real finding arrives in a
+    # stream of repeats nobody reads any more.
+    signature = actionable_signature(rows)
+    if on_change:
+        previous = read_previous_signature(state_file)
+        write_signature(signature, state_file)
+        if previous is not None and previous == signature:
+            click.echo(
+                "unchanged since the last run — not re-reporting "
+                f"({counts['_drift']} drifted, {counts['_broken']} broken "
+                "still outstanding)"
+            )
+            sys.exit(0)
+        if previous is None:
+            # A first run and a deleted state file are indistinguishable, and
+            # "cannot compare" must not read as "nothing changed".
+            click.echo("no previous state to compare against — reporting in full")
+    else:
+        write_signature(signature, state_file)
 
     if counts["_broken"]:
         broken = [r for r in rows if r.is_broken]

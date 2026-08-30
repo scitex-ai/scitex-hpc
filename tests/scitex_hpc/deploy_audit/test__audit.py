@@ -49,9 +49,17 @@ def _make_checkout(tmp_path, name):
 
 
 def _advance(author, tmp_path, n=2):
-    for i in range(n):
-        (author / "mod.py").write_text(f"v{i + 2}\n")
-        _run("git", "-C", str(author), "commit", "-am", f"v{i + 2}", cwd=tmp_path)
+    """Land ``n`` real commits upstream.
+
+    APPENDS rather than overwrites: rewriting the same content leaves nothing
+    to commit, and `git commit -am` then fails instead of advancing — which is
+    how a "two advances" test silently became a one-advance test.
+    """
+    target = author / "mod.py"
+    for _ in range(n):
+        with target.open("a") as handle:
+            handle.write("another line\n")
+        _run("git", "-C", str(author), "commit", "-am", "advance", cwd=tmp_path)
     _run("git", "-C", str(author), "push", cwd=tmp_path)
 
 
@@ -176,3 +184,76 @@ def test_an_empty_venv_audits_to_nothing(venv):
     assert rows == []
 
 # EOF
+
+
+def test_signature_ignores_installs_needing_no_action(venv, tmp_path):
+    # Arrange — one clean install and nothing else
+    _author, deploy = _make_checkout(tmp_path, "clean")
+    _make_editable(venv, "pkg_clean", deploy)
+    # Act
+    sig = _audit.actionable_signature(_audit.audit_venv(venv))
+    # Assert
+    assert sig == ""
+
+
+def test_signature_names_the_actionable_install(venv, tmp_path):
+    # Arrange
+    _make_editable(venv, "pkg_gone", tmp_path / "absent")
+    # Act
+    sig = _audit.actionable_signature(_audit.audit_venv(venv))
+    # Assert
+    assert sig == f"pkg_gone:{_audit.STATE_SOURCE_MISSING}"
+
+
+def test_signature_is_stable_as_a_checkout_falls_further_behind(venv, tmp_path):
+    # Arrange — already-known-behind, then more commits land upstream
+    author, deploy = _make_checkout(tmp_path, "drifting")
+    _advance(author, tmp_path, n=1)
+    _make_editable(venv, "pkg_drift", deploy)
+    first = _audit.actionable_signature(_audit.audit_venv(venv))
+    _advance(author, tmp_path, n=3)
+    # Act
+    second = _audit.actionable_signature(_audit.audit_venv(venv))
+    # Assert — the same standing condition must not re-page every commit
+    assert second == first
+
+
+def test_signature_changes_when_a_new_install_breaks(venv, tmp_path):
+    # Arrange
+    _make_editable(venv, "pkg_gone", tmp_path / "absent")
+    first = _audit.actionable_signature(_audit.audit_venv(venv))
+    _make_editable(venv, "pkg_gone_two", tmp_path / "absent2")
+    # Act
+    second = _audit.actionable_signature(_audit.audit_venv(venv))
+    # Assert
+    assert second != first
+
+
+def test_missing_state_file_reads_as_cannot_compare(tmp_path):
+    # Arrange — a deleted state file and a first run are the same situation
+    target = tmp_path / "never-written.state"
+    # Act
+    previous = _audit.read_previous_signature(target)
+    # Assert — None, NOT "" — "cannot compare" must not read as "was clean"
+    assert previous is None
+
+
+def test_a_written_signature_reads_back(tmp_path):
+    # Arrange
+    target = tmp_path / "sub" / "deploy-audit.state"
+    _audit.write_signature("pkg_x:behind", target)
+    # Act
+    previous = _audit.read_previous_signature(target)
+    # Assert
+    assert previous == "pkg_x:behind"
+
+
+def test_writing_to_an_unwritable_path_does_not_raise(tmp_path):
+    # Arrange — best effort: losing the memo must never fail the audit itself
+    blocked = tmp_path / "afile"
+    blocked.write_text("x")
+    target = blocked / "nested" / "state"
+    # Act
+    _audit.write_signature("pkg_x:behind", target)
+    # Assert
+    assert _audit.read_previous_signature(target) is None

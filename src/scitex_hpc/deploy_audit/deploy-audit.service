@@ -10,7 +10,13 @@ Type=oneshot
 # A LOGIN shell: a systemd --user unit inherits no `module load`, so an
 # EasyBuild-symlinked interpreter exits 127 while the file is present and
 # executable the whole time. Measured 2026-08-30 on this exact host.
-ExecStart=/bin/bash -lc '%h/.venv/bin/scitex-hpc audit-deploys --quiet'
+# --on-change, NOT plain --quiet. Measured 2026-08-30: this venv has 9
+# broken installs that are real, reported, and outside my remit to fix.
+# Without --on-change the unit would fail and page EVERY HOUR for a
+# standing condition, which is the alarm fatigue that makes the next real
+# finding invisible. The condition stays visible in the log and in a
+# by-hand run; only the re-paging stops.
+ExecStart=/bin/bash -lc '%h/.venv/bin/scitex-hpc audit-deploys --quiet --on-change'
 # 20 (drift) and 21 (broken) are VERDICTS, and they must reach OnFailure.
 # Only 0 is success here.
 SuccessExitStatus=0

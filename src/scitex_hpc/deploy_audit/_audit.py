@@ -10,7 +10,16 @@ from pathlib import Path
 
 from ..ci_runners._deploy import inspect_checkout
 
-__all__ = ["InstallRow", "editable_installs", "audit_venv", "summarize"]
+__all__ = [
+    "InstallRow",
+    "editable_installs",
+    "audit_venv",
+    "summarize",
+    "actionable_signature",
+    "read_previous_signature",
+    "write_signature",
+    "DEFAULT_STATE_PATH",
+]
 
 #: A source directory recorded by the install but absent on disk. NOT the same
 #: as stale: the package may not import at all. Measured 2026-08-30, 9 of 62
@@ -114,5 +123,50 @@ def summarize(rows: list[InstallRow]) -> dict[str, int]:
     counts["_drift"] = sum(1 for r in rows if r.is_drift)
     counts["_broken"] = sum(1 for r in rows if r.is_broken)
     return counts
+
+
+#: Where the last run's actionable set is remembered, beside the fleet's other
+#: watch state.
+DEFAULT_STATE_PATH = Path.home() / ".scitex/hpc/runtime/deploy-audit.state"
+
+
+def actionable_signature(rows: list[InstallRow]) -> str:
+    """A stable fingerprint of WHAT needs action, ignoring what does not.
+
+    Deliberately excludes ahead/behind COUNTS. A checkout that falls further
+    behind while already known-behind is the same standing condition, not a new
+    one, and re-alarming on every commit upstream is precisely the fatigue that
+    makes the next real finding invisible.
+    """
+    parts = [
+        f"{r.name}:{r.state}"
+        for r in sorted(rows, key=lambda r: r.name)
+        if r.is_drift or r.is_broken
+    ]
+    return "\n".join(parts)
+
+
+def read_previous_signature(path: str | Path | None = None) -> str | None:
+    """The last recorded signature, or None if there is no usable record.
+
+    None means "cannot compare", which is NOT the same as "nothing was wrong
+    last time" — a first run and a deleted state file both land here, and the
+    caller must treat that as a reason to report rather than to stay silent.
+    """
+    target = Path(path) if path is not None else DEFAULT_STATE_PATH
+    try:
+        return target.read_text()
+    except OSError:
+        return None
+
+
+def write_signature(signature: str, path: str | Path | None = None) -> None:
+    """Record the current actionable set. Best effort: never fail the audit."""
+    target = Path(path) if path is not None else DEFAULT_STATE_PATH
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(signature)
+    except OSError:
+        pass
 
 # EOF

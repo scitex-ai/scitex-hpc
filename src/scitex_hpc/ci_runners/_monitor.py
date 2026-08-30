@@ -241,7 +241,16 @@ LIVE="$(
 down=()
 for name in $RUNNER_NAMES; do
   dir="${{RUNNER_DIRS[$name]}}"
-  if ! printf '%s\\n' "$LIVE" | grep -qF "$dir"; then
+  # Match the install dir's BASENAME, not its full path. RUNNER_DIRS holds the
+  # path as `ls <ci_base>` reported it, but `pgrep -af` reports the listener's
+  # RESOLVED argv -- and an install dir may be a SYMLINK to another tree.
+  # Measured 2026-08-30: ci/actions-runner-spartan-pooled-cpu-01 is a symlink
+  # to ci-pooled/actions-runner-spartan-pooled-cpu-01, so a full-path grep
+  # compared the LINK against the TARGET, never matched, and reported a runner
+  # DOWN whose listener was plainly running. The basename is identical on both
+  # sides; the leading and trailing slashes keep `-figrecipe/` from matching
+  # `-figrecipe-02/`.
+  if ! printf '%s\\n' "$LIVE" | grep -qF "/${{dir##*/}}/"; then
     down+=("$name")
     # Nudge the supervisor keep-alive loop WITHOUT touching live runners:
     # drop a marker the loop's next iteration picks up. The monitor never

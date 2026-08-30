@@ -174,16 +174,23 @@ def watch_cmd(host, ci_base, exclude, jobid_file, no_deploy_check):
       14  DEPLOY DRIFT: the running code is not the merged code — alarm fired
 
     \b
-    10-13 are the monitor's own codes, passed through unchanged. They start
-    at 10 deliberately: 1-9 are what bash returns when the generated script
-    cannot run at all (127 interpreter/PATH, 126 not executable), so a
-    two-digit code always means "the monitor RAN and reached a verdict".
+    10-13 are the monitor's own codes, passed through unchanged by
+    ``sys.exit(proc.returncode)``. They start at 10 deliberately: 1-9 are
+    what bash itself returns when the generated script cannot run at all
+    (127 = interpreter/PATH, 126 = not executable, 1 = a shell-level
+    failure), so a two-digit code always means "the monitor RAN and
+    reached a verdict" and a one-digit one always means "it never got
+    that far". A watchdog that cannot tell those apart reports an
+    unreachable cluster and a broken launcher identically.
 
     \b
-    14 is this command's own. It fires only when the fleet is otherwise
-    HEALTHY -- a real outage always wins the exit code, because a stale
-    deploy must never mask a down cluster. Pass ``--no-deploy-check`` to
-    skip it (or when origin is deliberately unreachable).
+    14 is this command's own, and it is the one code that is NOT a fleet
+    verdict: it says the fleet's verdict cannot be trusted because the
+    code that produced it is not the merged code. It fires only when the
+    fleet is otherwise HEALTHY -- a real outage always wins the exit code,
+    because a stale deploy must never mask a down cluster. Pass
+    ``--no-deploy-check`` to skip it (or when origin is deliberately
+    unreachable).
 
     \b
     Example (federated cron installs this automatically):

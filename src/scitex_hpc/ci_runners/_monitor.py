@@ -60,6 +60,30 @@ from ._fleet import FleetSpec
 # names. If unset, fall back to the fleet notify.sh helper (subject =
 # first line, body = rest) when it exists; otherwise just emit to stderr
 # so cron mails it. Never silently swallow a failure.
+#: Run ONE command on the cluster under a LOGIN shell.
+#
+# WHY THIS EXISTS RATHER THAN AN INLINE ``ssh "$HOST" bash -lc "<cmd>"``.
+# ssh does NOT pass argv through. It JOINS its arguments with spaces and
+# hands the result to the remote shell as one command string, so the local
+# quotes around <cmd> are consumed HERE and the remote receives
+#
+#     bash -lc squeue --user=$USER --job=123 --noheader ...
+#
+# where ``-c`` takes only the next WORD as its command and the rest become
+# $0/$1/... The remote then runs a BARE ``squeue``. That is not an error,
+# it is a WRONG ANSWER, and it is why this monitor could never pass.
+# Measured 2026-08-30 against a healthy, RUNNING supervisor:
+#   step 0  read an EMPTY holder id  -> exit 12 "supervisor UNREGISTERED"
+#           while the file plainly existed and `cat` returned it
+#   step 1  read `squeue`'s HEADER row -> STATE=PARTITION, JOBID=JOBID
+#           -> exit 11 "allocation DOWN"
+#   step 3  would run a bare `df` and take an arbitrary filesystem's IUse%
+# ``printf %q`` escapes the command into a single shell WORD, so it
+# survives the join intact and ``-c`` receives the whole thing.
+_RSH_FUNC = r"""# --- remote exec (see _RSH_FUNC in _monitor.py for why %q) ---
+rsh() { ssh "$HOST" bash -lc "$(printf '%q' "$1")" 2>/dev/null; }
+"""
+
 _ALARM_FUNC = r"""# --- alarm contract ---
 # Override the whole mechanism with $SCITEX_CI_ALARM_CMD (reads
 # "<subject>\n<body>" on stdin). Default: fleet notify.sh, else stderr.
@@ -138,9 +162,9 @@ def build_monitor_script(
         resolve_preamble = (
             "# --- 0. resolve holder job id from the supervisor runtime "
             "file --\n"
-            'HOLDER_JOBID="$(ssh "$HOST" bash -lc '
+            'HOLDER_JOBID="$(rsh '
             f"'cat {overlap_jobid_file} 2>/dev/null'"
-            ' 2>/dev/null | tr -dc "0-9")"\n'
+            ' | tr -dc "0-9")"\n'
             'if [ -z "$HOLDER_JOBID" ]; then\n'
             '  alarm "scitex-ci: supervisor UNREGISTERED" \\\n'
             f'    "no holder jobid at {overlap_jobid_file} on $HOST -- the '
@@ -184,6 +208,7 @@ LEASE_NAME="{lease_name}"
 SRUN="{srun}"
 
 {_ALARM_FUNC}
+{_RSH_FUNC}
 declare -A RUNNER_DIRS=(
 {dirs}
 )
@@ -195,9 +220,8 @@ TS="$(date -u +%FT%TZ)"
 # A single login-shell SSH does the squeue lookup; everything else keys
 # off the resolved JOBID so we never re-query the scheduler per runner.
 read -r JOBID STATE NODE < <(
-  ssh "$HOST" bash -lc \\
-    "squeue --user=\\$USER {squeue_selector} --noheader --format='%i %T %N' 2>/dev/null" \\
-    2>/dev/null | awk 'NR==1{{print $1, $2, $3}}'
+  rsh "squeue --user=\\$USER {squeue_selector} --noheader --format='%i %T %N' 2>/dev/null" \\
+    | awk 'NR==1{{print $1, $2, $3}}'
 )
 if [ "${{STATE:-}}" != "RUNNING" ] || [ -z "${{JOBID:-}}" ] || [ -z "${{NODE:-}}" ]; then
   alarm "scitex-ci: supervisor allocation DOWN" \\
@@ -211,9 +235,7 @@ fi
 # cmdline; each runner is matched by its install dir appearing in the
 # listener argv (run.sh passes the dir). This is read-only.
 LIVE="$(
-  ssh "$HOST" bash -lc \\
-    "$SRUN --jobid=$JOBID --overlap pgrep -af Runner.Listener 2>/dev/null" \\
-    2>/dev/null || true
+  rsh "$SRUN --jobid=$JOBID --overlap pgrep -af Runner.Listener 2>/dev/null" || true
 )"
 
 down=()
@@ -225,7 +247,7 @@ for name in $RUNNER_NAMES; do
     # drop a marker the loop's next iteration picks up. The monitor never
     # cancels the job nor kills a process -- relaunch is the supervisor's
     # job, alarm is ours.
-    ssh "$HOST" bash -lc "touch '$dir/.needs-restart' 2>/dev/null" \\
+    rsh "touch '$dir/.needs-restart' 2>/dev/null" \\
       >/dev/null 2>&1 || true
   fi
 done
@@ -245,8 +267,8 @@ fi
 # full fileset with live listeners would report "healthy" -- so check it
 # explicitly. df -i is read-only; IUse% is the second-to-last column.
 IUSE="$(
-  ssh "$HOST" bash -lc "df -i '{inode_target}' 2>/dev/null | tail -1" \\
-    2>/dev/null | awk '{{u=$(NF-1); gsub(/%/,"",u); print u}}'
+  rsh "df -i '{inode_target}' 2>/dev/null | tail -1" \\
+    | awk '{{u=$(NF-1); gsub(/%/,"",u); print u}}'
 )"
 if [ -n "$IUSE" ] && [ "$IUSE" -ge {inode_threshold_pct} ] 2>/dev/null; then
   alarm "scitex-ci: runner fileset inode-critical (${{IUSE}}%)" \\

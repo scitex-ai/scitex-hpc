@@ -37,6 +37,8 @@ import sys
 import click
 
 from ..ci_runners import build_monitor_script
+from ..ci_runners._deploy import inspect_deploy
+from ..ci_runners._monitor import _ALARM_FUNC
 from ..ci_runners._archive import build_archive_script
 from ..ci_runners._overlap import DEFAULT_HOLDER_JOBID_PATH
 from ..ci_runners._register import DEFAULT_RUNNER_LABELS, build_register_command
@@ -123,6 +125,20 @@ def show_monitor_cmd(
     _common.emit_script(script, out_path, as_json)
 
 
+def _fire_alarm(subject: str, body: str) -> None:
+    """Fire an alarm through the monitor's OWN contract.
+
+    Deliberately re-uses ``_ALARM_FUNC`` rather than reimplementing it in
+    Python: two alarm paths drift, and the one that drifts is always the
+    one that has never fired.
+    """
+    import subprocess as _sp
+
+    _sp.run(
+        ["bash", "-c", _ALARM_FUNC + '\nalarm "$1" "$2"', "alarm", subject, body],
+        check=False,
+    )
+
 @click.command("watch")
 @click.option("--host", default="spartan", help="SSH host (default: spartan).")
 @click.option("--ci-base", default=_common.DEFAULT_CI_BASE, help="CI base dir.")
@@ -132,7 +148,15 @@ def show_monitor_cmd(
     default=DEFAULT_HOLDER_JOBID_PATH,
     help="Runtime file the supervisor writes its holder job id to.",
 )
-def watch_cmd(host, ci_base, exclude, jobid_file):
+@click.option(
+    "--no-deploy-check",
+    "no_deploy_check",
+    is_flag=True,
+    help="Skip the deploy-drift check (exit 14). See _deploy.py for why it "
+    "exists: an editable install makes a working tree the artifact, so "
+    "merged silently reads as deployed.",
+)
+def watch_cmd(host, ci_base, exclude, jobid_file, no_deploy_check):
     """Run ONE supervisor health-check tick (the cron watchdog entrypoint).
 
     This is the command the federated ``scitex_dev.jobs`` JobSpec runs every
@@ -142,10 +166,24 @@ def watch_cmd(host, ci_base, exclude, jobid_file):
     and exits with the monitor's code:
 
     \b
-      0  fleet healthy
-      1  degraded (some runners down) — alarm fired
-      2  allocation gone / unreachable — alarm fired
-      3  supervisor UNREGISTERED (no holder jobid file) — alarm fired
+      0   fleet healthy
+      10  degraded (some runners down) — alarm fired
+      11  allocation gone / unreachable — alarm fired
+      12  supervisor UNREGISTERED (no holder jobid file) — alarm fired
+      13  runner fileset out of inodes — alarm fired
+      14  DEPLOY DRIFT: the running code is not the merged code — alarm fired
+
+    \b
+    10-13 are the monitor's own codes, passed through unchanged. They start
+    at 10 deliberately: 1-9 are what bash returns when the generated script
+    cannot run at all (127 interpreter/PATH, 126 not executable), so a
+    two-digit code always means "the monitor RAN and reached a verdict".
+
+    \b
+    14 is this command's own. It fires only when the fleet is otherwise
+    HEALTHY -- a real outage always wins the exit code, because a stale
+    deploy must never mask a down cluster. Pass ``--no-deploy-check`` to
+    skip it (or when origin is deliberately unreachable).
 
     \b
     Example (federated cron installs this automatically):
@@ -162,7 +200,41 @@ def watch_cmd(host, ci_base, exclude, jobid_file):
         overlap_jobid_file=jobid_file,
     )
     proc = subprocess.run(["bash", "-c", script])
-    sys.exit(proc.returncode)
+    rc = proc.returncode
+
+    if no_deploy_check:
+        sys.exit(rc)
+
+    # Ask the IMPORTED module where it lives -- never guess a path, because
+    # guessing is exactly what the editable-install indirection defeats.
+    from ..ci_runners import _monitor as _monitor_mod
+
+    dep = inspect_deploy(_monitor_mod.__file__)
+    click.echo(f"DEPLOY {dep.state} {dep.detail}", err=(rc != 0))
+
+    if not dep.is_drift:
+        sys.exit(rc)
+
+    if rc != 0:
+        # A real outage outranks drift. Say both, exit the outage's code:
+        # silencing a down cluster to report a pull would be a strict
+        # downgrade of the alarm.
+        click.echo(
+            f"DEPLOY drift NOT escalated: fleet verdict {rc} takes "
+            "precedence (fix the fleet, then deploy)",
+            err=True,
+        )
+        sys.exit(rc)
+
+    _fire_alarm(
+        "scitex-ci: DEPLOY DRIFT -- watchdog is grading stale code",
+        f"{dep.detail}\n\nThe fleet itself reported HEALTHY, so this is not "
+        "an outage. It is worse in one specific way: every verdict this "
+        "watchdog produces is sourced from code that is not the merged "
+        "code, so both its OK and its CRITICAL are untrustworthy until the "
+        "deploy site is fast-forwarded.",
+    )
+    sys.exit(14)
 
 
 @click.command("show-register")

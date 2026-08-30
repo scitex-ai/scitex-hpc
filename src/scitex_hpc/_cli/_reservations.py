@@ -44,6 +44,9 @@ from ._lease_ops import (
 )
 
 
+from ._lease_verify import lease_verify_cmd
+
+
 @click.group("lease")
 def lease() -> None:
     """Persistent SLURM allocations (book once, exec many).
@@ -64,6 +67,7 @@ for _cmd in (
     sync_state_cmd,
     attach_cmd,
     close_cmd,
+    lease_verify_cmd,
     # deprecated spellings — hidden, warn once, same bodies
     refresh_alias,
     cancel_alias,

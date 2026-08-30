@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodic editable-install deploy-drift audit
+
+[Timer]
+# Interval, not OnCalendar: drift appears when someone merges, which is not
+# tied to a wall-clock hour. Hourly is far more often than deploys happen and
+# far cheaper than the outage it prevents -- the alarm fires on a CHANGE of
+# state, so a standing drift does not re-page.
+OnBootSec=10min
+OnUnitActiveSec=1h
+Persistent=false
+
+[Install]
+WantedBy=timers.target

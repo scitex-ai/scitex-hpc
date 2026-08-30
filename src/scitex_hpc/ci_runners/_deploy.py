@@ -43,7 +43,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["DeployState", "inspect_deploy"]
+__all__ = ["DeployState", "inspect_deploy", "inspect_checkout"]
 
 #: Never let a hung git hold the watchdog tick open.
 _GIT_TIMEOUT_S = 30
@@ -88,13 +88,35 @@ def inspect_deploy(
     fetch: bool = True,
     runner=subprocess.run,
 ) -> DeployState:
-    """Grade the checkout that provides ``module_file``.
+    """Grade the checkout that provides ``module_file`` (see inspect_checkout)."""
+    return inspect_checkout(
+        Path(module_file).resolve().parent,
+        remote=remote,
+        fetch=fetch,
+        runner=runner,
+    )
 
-    ``module_file`` is normally ``some_module.__file__`` — resolve the code
-    by asking the *imported module* where it lives, never by guessing a
-    path, because guessing is what the editable indirection defeats.
+
+def inspect_checkout(
+    start: str | Path,
+    *,
+    remote: str = "origin",
+    fetch: bool = True,
+    runner=subprocess.run,
+) -> DeployState:
+    """Grade the git checkout containing ``start`` (a directory or a file).
+
+    :func:`inspect_deploy` is the front door for the common case: pass a
+    module's ``__file__`` so the code is located by asking the *imported
+    module* where it lives, never by guessing a path — guessing is what the
+    editable indirection defeats.
+
+    This lower-level form exists for auditing checkouts nobody imported,
+    e.g. every editable install in a venv (:mod:`scitex_hpc.deploy_audit`),
+    where the source directory comes from ``direct_url.json`` rather than
+    from an import.
     """
-    start = Path(module_file).resolve().parent
+    start = Path(start).resolve()
     try:
         top = _git(start, "rev-parse", "--show-toplevel", runner=runner)
     except (OSError, subprocess.SubprocessError) as exc:

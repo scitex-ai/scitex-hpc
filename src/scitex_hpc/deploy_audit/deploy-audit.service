@@ -1,0 +1,19 @@
+[Unit]
+Description=Audit every editable install in the venv for deploy drift
+# card: spartan-deploy-checkout-has-no-deploy-step-20260830
+# Documentation= rejects a non-URL ("Invalid URL, ignoring"), so the card id
+# lives in a comment. A link systemd discards is not a link.
+OnFailure=scitex-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+# A LOGIN shell: a systemd --user unit inherits no `module load`, so an
+# EasyBuild-symlinked interpreter exits 127 while the file is present and
+# executable the whole time. Measured 2026-08-30 on this exact host.
+ExecStart=/bin/bash -lc '%h/.venv/bin/scitex-hpc audit-deploys --quiet'
+# 20 (drift) and 21 (broken) are VERDICTS, and they must reach OnFailure.
+# Only 0 is success here.
+SuccessExitStatus=0
+# The audit fetches once per checkout; on a 62-package venv that is network
+# bound, not CPU bound.
+TimeoutStartSec=900

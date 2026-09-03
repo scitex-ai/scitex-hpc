@@ -26,4 +26,15 @@ and that recurred 2026-08-29.
 Proof of "serving" is /v1/models returning a model id. A TCP connect is not
 proof: a dead-but-listening forward accepts the connection and returns nothing,
 rendering identically to a refused one (both HTTP 000).
+
+Drift is only half the question. The watcher asks "is a pooled member serving?";
+`_policy` answers "may this member be pooled at all?", which no probe can decide
+— the A100 at 18776 is reachable, healthy and forbidden by an operator ruling.
+Keep the two apart: policy states what is allowed, the probe states what is
+alive, and drift is where they disagree. INCIDENTS.md holds the measurements
+behind each entry.
 """
+
+from ._policy import FLEET_POLICY, Exclusion, UpstreamPolicy
+
+__all__ = ["FLEET_POLICY", "Exclusion", "UpstreamPolicy"]

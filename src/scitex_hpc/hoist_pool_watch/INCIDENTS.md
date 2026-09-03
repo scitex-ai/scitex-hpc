@@ -42,14 +42,22 @@ question: agents reach the models through **this proxy's pool**, not through the
 direct path a spec names. Measured the same day, 18776 was carrying 19 requests
 and 1.60M prompt tokens — more than any H100 — with no spec naming it anywhere.
 
-It is also a magnet under least-loaded selection. At roughly 8.7x slower than an
-H100 (73.1 s mean TTFT against 8.4 s) it drains its queue faster than work
-arrives, and therefore keeps *looking* least-loaded. The selection policy is
-correct for a pool of interchangeable members and wrong for a heterogeneous one;
-removing the odd member is the fix, not tuning the policy.
+**The reason is simpler than the analysis around it.** Asked directly on
+2026-09-03, the operator gave it in one line: 「ただ、A100だと遅いからって言うだけ
+です」「H100でも遅いのに、A100で使ってられるかってことです」 — the card is slow;
+even an H100 is slower than we would like for this model, so an A100 is not worth
+a slot. He also called the exclusion 「たまたま私たちの趣味趣向」, our taste, which
+is why it belongs in a config file and not in this package.
 
-**What it teaches:** admission is a **second axis**, independent of liveness. A
-healthy, reachable endpoint can be forbidden, and no probe will ever say so.
+Two measurements sit alongside that preference and should not be mistaken for
+it. The A100 was about 8.7x slower on time-to-first-token (73.1 s against 8.4 s),
+and because a slower card drains its queue faster than work arrives it can keep
+*looking* least-loaded to a selection policy that assumes members are
+interchangeable. That is a real effect and it is not the reason for the ruling.
+
+**What it teaches:** admissibility is a **second axis**, independent of liveness.
+A healthy, reachable endpoint can be one we simply do not want, and no probe will
+ever say so.
 
 ## 2026-08-28 — a dead member cost one request in three
 

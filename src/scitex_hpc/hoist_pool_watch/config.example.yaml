@@ -1,0 +1,36 @@
+# Pool preference for the hoist proxy — copy into ~/.scitex/hpc/config.yaml
+#
+# WHICH UPSTREAMS WE ARE WILLING TO ROUTE TO. This is a preference, not a fact
+# about the world, which is why it lives here rather than in the package. The
+# drift watcher reads it to answer a question no probe can: a card may be
+# reachable and healthy and still not one we want.
+#
+# Ports are the LOCAL ports the proxy routes to (reverse-tunnel endpoints on the
+# host running it). Yours will differ; nothing in the package knows these.
+
+hoist_pool:
+  # Members we are willing to use, when they are serving.
+  expected:
+    - 18773
+    - 18774
+
+  # Members held out, each with a stated reason. A blank reason is refused:
+  # an unexplained exclusion is indistinguishable from an oversight, and the
+  # next reader probes the port, finds it healthy, and restores it.
+  excluded:
+    18776:
+      reason: >-
+        A100 — too slow to be worth a slot. Even an H100 is slower than we would
+        like for this model, so an A100 is not worth using. It ANSWERS probes,
+        so only this line keeps it out.
+      decided_on: "2026-08-16"
+      decided_by: operator
+      reversible_when: we decide otherwise; no measurement reverses a preference
+
+    18775:
+      reason: >-
+        not serving. A dead member of a fan-out pool is not resilience — roughly
+        one request in three returned 502 and killed a working agent mid-task.
+      decided_on: "2026-08-28"
+      decided_by: measured
+      reversible_when: it serves again; this one is a capacity loss, not a preference

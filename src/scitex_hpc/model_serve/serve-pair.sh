@@ -50,6 +50,21 @@ REAL_HOME=${HOME:-/home/ywatanabe}
 SERVE=$REAL_HOME/serve-model.sh
 SELF=$REAL_HOME/serve-pair.sh
 
+# srun BY ABSOLUTE PATH, and this is the whole reason job 29965837 held two
+# H100s for 17h50m without serving a token. sbatch propagates the SUBMITTER s
+# environment, and a non-interactive shell on this cluster has
+# PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin with no Slurm bin on
+# it. So a bare srun resolved for jobs submitted from a login shell and did not
+# for jobs submitted from an agent shell, and every step died
+# "srun: command not found" -- 4278 times. A bare name resolves or not
+# depending on WHO submitted the job; an absolute path does not. Same reasoning
+# that already makes squeue/sbatch/scontrol absolute everywhere else here.
+#
+# Prefer the `latest` symlink so this survives the next Slurm upgrade, and FAIL
+# FAST when it is missing rather than discovering it 4278 restarts later.
+SRUN=${SRUN:-/apps/slurm/latest/bin/srun}
+[ -x "$SRUN" ] || { echo "FATAL: $SRUN is not executable" >&2; exit 2; }
+
 [ -r "$SERVE" ] || { echo "FATAL: $SERVE unreadable" >&2; exit 2; }
 
 # Resubmit from the CANONICAL path, never "$0" -- inside a batch job $0 is the
@@ -91,8 +106,13 @@ _spawn() {
   local key=$1
   while true; do
     echo "[pair] $(date -u +%FT%TZ) starting step for $key" >&2
-    srun --overlap --ntasks=1 --exact bash "$SERVE" "$key"
-    echo "[pair] $(date -u +%FT%TZ) step $key exited rc=$?; restart in 30s" >&2
+    "$SRUN" --overlap --ntasks=1 --exact bash "$SERVE" "$key"
+    rc=$?
+    echo "[pair] $(date -u +%FT%TZ) step $key exited rc=$rc; restart in 30s" >&2
+    if [ "$rc" -eq 127 ]; then
+      echo "[pair] rc=127 is command-not-found and never self-heals; aborting" >&2
+      exit 127
+    fi
     sleep 30
   done
 }

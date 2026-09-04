@@ -26,4 +26,17 @@ and that recurred 2026-08-29.
 Proof of "serving" is /v1/models returning a model id. A TCP connect is not
 proof: a dead-but-listening forward accepts the connection and returns nothing,
 rendering identically to a refused one (both HTTP 000).
+
+Drift is only half the question. The watcher asks "is a pooled member serving?";
+`_policy` answers "are we willing to use it at all?", which no probe can decide —
+a card can be reachable, healthy, and still one we would rather not use.
+
+That second answer is a PREFERENCE, so its values live in the user's config
+(`~/.scitex/hpc/config.yaml`, section `hoist_pool:`) and only the types live
+here. See config.example.yaml beside this file, and INCIDENTS.md for the
+measurements that motivated the watcher.
 """
+
+from ._policy import Exclusion, UpstreamPolicy, config_candidates, load_policy
+
+__all__ = ["Exclusion", "UpstreamPolicy", "load_policy", "config_candidates"]

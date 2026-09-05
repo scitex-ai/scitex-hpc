@@ -152,10 +152,16 @@ trap _withdraw_discovery EXIT
 # ---- CUDA / venv. Absolute paths captured BEFORE any cd: a cd after a module
 # ---- load silently wipes the module PATH on this cluster.
 export CUDA_HOME=/apps/easybuild-2022/easybuild/software/Core/CUDA/12.8.0
-export PATH="$CUDA_HOME/bin:$BASE/vllm-venv/bin:$PATH"
+# The venv is a parameter so ONE replica can be moved to a new vLLM build while
+# the other keeps serving from the old one (2026-09-05: 0.22.0 -> 0.28.0, the
+# MambaManager assert fix). Default unchanged; export VLLM_VENV in the conf or
+# the environment to override. A missing venv is a loud stop, not a fallback.
+VLLM_VENV="${VLLM_VENV:-$BASE/vllm-venv}"
+[ -x "$VLLM_VENV/bin/vllm" ] || { echo "[serve] VLLM_VENV=$VLLM_VENV has no bin/vllm" >&2; exit 78; }
+export PATH="$CUDA_HOME/bin:$VLLM_VENV/bin:$PATH"
 export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
-VLLM_BIN=$BASE/vllm-venv/bin/vllm
-LITELLM_BIN=$BASE/vllm-venv/bin/litellm
+VLLM_BIN=$VLLM_VENV/bin/vllm
+LITELLM_BIN=$VLLM_VENV/bin/litellm
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 # hf_transfer is NOT installed in this venv; enabling it would raise.
 unset HF_HUB_ENABLE_HF_TRANSFER

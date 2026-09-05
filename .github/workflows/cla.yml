@@ -38,6 +38,26 @@ name: CLA Assistant
 #   pin 1c593985  main@2026-07-31   both jobs hard-coded to the Spartan pool
 #   pin 57e2e772  main@2026-08-11   runs-on: ${{ fromJSON(inputs.runs_on) }}
 #                                   default '["ubuntu-latest"]'
+#   pin f5d19f5b  main@2026-08-30   signature branch
+#                                   `cla-signatures` -> `cla` (#44); the
+#                                   #113 bump set this
+#                                   SHA but left the
+#                                   `# main@2026-08-11`
+#                                   comment and this
+#                                   table stale.
+#   pin b507cc0e  main@2026-08-31   THIS BUMP:
+#                                   only callee change since the previous
+#                                   pin is #46
+#                                   (90b5645): fork PRs
+#                                   route to `ubuntu-latest` instead of
+#                                   being refused on every
+#                                   self-hosted job;
+#                                   `cla.yml` is byte-identical at
+#                                   the two SHAs, so this bump changes
+#                                   no behaviour; it lands this caller
+#                                   on the latest reviewed callee code
+#                                   and keeps the `# main@<date>`
+#                                   comment true.
 #
 # The callee's own words for why the default inverted: "DEFAULT IS ubuntu-latest
 # BECAUSE THIS JOB IS OUTSIDER-TRIGGERABLE ... A compromise on an ephemeral
@@ -73,7 +93,7 @@ jobs:
     # CLAssistant posts its commit status via a raw Statuses-API call with a
     # hardcoded context "CLAssistant" (not tied to this job id) — no
     # required-status-check rename needed.
-    uses: scitex-ai/.github/.github/workflows/cla.yml@f5d19f5b7424fcf985137bb6acff54f5d0e11749 # main@2026-08-11
+    uses: scitex-ai/.github/.github/workflows/cla.yml@b507cc0e03f47d75c24e5cbe7830f32b5a3a2e25 # main@2026-08-31
     # owner_allowlist overridden: this repo's allowlist has an extra
     # "LLEmacs" entry beyond the reusable workflow's "bot*,ywatanabe1989" default.
     # Taking the default would start demanding a CLA signature from an

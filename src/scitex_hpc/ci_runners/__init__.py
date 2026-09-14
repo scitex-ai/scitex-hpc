@@ -59,6 +59,7 @@ from ._overlap import (
 from ._register import (
     DEFAULT_RUNNER_LABELS,
     REQUIRED_LABEL,
+    REQUIRED_LABELS,
     build_register_command,
     missing_required_labels,
     normalize_labels,
@@ -75,6 +76,7 @@ __all__ = [
     "DEFAULT_RESTART_BACKOFF_SECONDS",
     "DEFAULT_RUNNER_LABELS",
     "REQUIRED_LABEL",
+    "REQUIRED_LABELS",
     "RUNNER_DIR_PREFIX",
     "RUNNER_DIR_PREFIXES",
     "FleetSpec",

@@ -1,10 +1,11 @@
-"""Tests for canonical runner registration — the scitex-ci label bake-in."""
+"""Tests for canonical runner registration label eligibility."""
 
 from __future__ import annotations
 
 from scitex_hpc.ci_runners import (
     DEFAULT_RUNNER_LABELS,
     REQUIRED_LABEL,
+    REQUIRED_LABELS,
     build_register_command,
     missing_required_labels,
     normalize_labels,
@@ -22,13 +23,22 @@ def test_default_labels_include_scitex_ci():
     assert present is True
 
 
+def test_default_labels_include_all_required_route_labels():
+    # Arrange
+    labels = DEFAULT_RUNNER_LABELS
+    # Act
+    missing = [label for label in REQUIRED_LABELS if label not in labels]
+    # Assert
+    assert missing == []
+
+
 def test_normalize_appends_required_when_missing():
     # Arrange
     labels = ["spartan-cpu"]
     # Act
     out = normalize_labels(labels)
     # Assert
-    assert out == ["spartan-cpu", "scitex-ci"]
+    assert out == ["spartan-cpu", "scitex-ci", "scitex-org-cpu"]
 
 
 def test_normalize_dedupes_and_strips_order_preserving():
@@ -37,7 +47,7 @@ def test_normalize_dedupes_and_strips_order_preserving():
     # Act
     out = normalize_labels(labels)
     # Assert
-    assert out == ["spartan-cpu", "scitex-ci", "gpu"]
+    assert out == ["spartan-cpu", "scitex-ci", "gpu", "scitex-org-cpu"]
 
 
 def test_normalize_keeps_required_present_only_once():
@@ -46,7 +56,7 @@ def test_normalize_keeps_required_present_only_once():
     # Act
     out = normalize_labels(labels)
     # Assert
-    assert out == ["scitex-ci", "spartan-cpu"]
+    assert out == ["scitex-ci", "spartan-cpu", "scitex-org-cpu"]
 
 
 def test_missing_required_flags_drifted_runner():
@@ -55,21 +65,28 @@ def test_missing_required_flags_drifted_runner():
     # Act
     missing = missing_required_labels(current)
     # Assert
-    assert missing == [REQUIRED_LABEL]
+    assert missing == ["scitex-ci", "scitex-org-cpu"]
 
 
 def test_missing_required_empty_for_correct_runner():
     # Arrange
-    current = ["self-hosted", "Linux", "X64", "spartan-cpu", "scitex-ci"]
+    current = [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "spartan-cpu",
+        "scitex-ci",
+        "scitex-org-cpu",
+    ]
     # Act
     missing = missing_required_labels(current)
     # Assert
     assert missing == []
 
 
-def test_build_command_bakes_scitex_ci_into_labels():
+def test_build_command_bakes_required_route_labels_into_labels():
     # Arrange
-    expected = "--labels spartan-cpu,scitex-ci"
+    expected = "--labels spartan-cpu,scitex-ci,scitex-org-cpu"
     # Act
     cmd = build_register_command(url=URL, name="scitex-hpc")
     # Assert
@@ -82,7 +99,16 @@ def test_build_command_forces_label_even_if_caller_omits_it():
     # Act
     cmd = build_register_command(url=URL, name="x", labels=labels)
     # Assert
-    assert "--labels spartan-cpu,scitex-ci" in cmd
+    assert "--labels spartan-cpu,scitex-ci,scitex-org-cpu" in cmd
+
+
+def test_missing_required_reports_only_missing_org_route():
+    # Arrange
+    current = ["self-hosted", "Linux", "X64", "spartan-cpu", "scitex-ci"]
+    # Act
+    missing = missing_required_labels(current)
+    # Assert
+    assert missing == ["scitex-org-cpu"]
 
 
 def test_build_command_starts_with_unattended_config():

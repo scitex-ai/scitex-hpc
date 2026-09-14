@@ -6,6 +6,13 @@ follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Canonical HPC runner registration now includes the organization-wide
+  `scitex-org-cpu` eligibility label in addition to the existing
+  `spartan-cpu` and `scitex-ci` labels. Newly registered runners can therefore
+  accept org CPU workflows instead of remaining online and idle while those
+  jobs queue elsewhere.
+
 ### Removed
 - **BREAKING — the `mcp` extra is gone.** Install MCP support with
   `pip install 'scitex-hpc[all]'`. PS-225 restricts extra *names* to

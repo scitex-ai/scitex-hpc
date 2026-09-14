@@ -77,10 +77,14 @@ chmod +x ~/.scitex/ci/monitor.sh
 # 5. (post-cutover) generate the band-aid archival script
 scitex-hpc ci-runners show-archive --out /tmp/archive-bandaids.sh
 
-# Registering / re-installing a runner (bakes the scitex-ci label in)
+# Registering / re-installing a runner (bakes shared CI route labels in)
 scitex-hpc ci-runners show-register \
   --url https://github.com/ywatanabe1989/scitex-hpc --name scitex-hpc
 ```
+
+The generated `--labels` value preserves the host-class `spartan-cpu` label
+and always includes both `scitex-ci` and `scitex-org-cpu`. This makes the
+runner eligible for the shared template and organization CPU workflows.
 
 Defaults target Spartan's `cascade` partition (32 cores / 128 GB / 7-day
 walltime, account `punim2354`, QOS `publiccpu`) — all overridable via

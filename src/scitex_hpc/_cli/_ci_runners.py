@@ -12,8 +12,8 @@ Subcommands:
   * ``show-monitor`` — emit the cron-driven health-monitor script.
   * ``watch`` — run ONE monitor tick (the federated cron entrypoint).
   * ``show-register`` — print the ``config.sh`` command that registers a
-    runner WITH the ``scitex-ci`` label baked in (closes label drift at
-    the source, so a re-registered runner never queues its repo's CI).
+    runner with shared and organization CPU route labels baked in (closes
+    label drift at the source, so eligible work reaches HPC runners).
   * ``show-archive`` — emit a script that archives the old ``~`` band-aid
     scripts to ``.old/<timestamp>/`` on the cluster (the operator runs it
     AFTER cutover; live runners still depend on the band-aids until then).
@@ -37,9 +37,9 @@ import sys
 import click
 
 from ..ci_runners import build_monitor_script
+from ..ci_runners._archive import build_archive_script
 from ..ci_runners._deploy import inspect_deploy
 from ..ci_runners._monitor import _ALARM_FUNC
-from ..ci_runners._archive import build_archive_script
 from ..ci_runners._overlap import DEFAULT_HOLDER_JOBID_PATH
 from ..ci_runners._register import DEFAULT_RUNNER_LABELS, build_register_command
 from . import _ci_runners_common as _common
@@ -262,7 +262,7 @@ def watch_cmd(host, ci_base, exclude, jobid_file, no_deploy_check):
     "--label",
     "labels",
     multiple=True,
-    help="Extra label(s) to register with (repeatable). scitex-ci is ALWAYS "
+    help="Extra label(s) to register with (repeatable). Required CI route labels are "
     f"added even if omitted. Default: {','.join(DEFAULT_RUNNER_LABELS)}.",
 )
 @click.option(
@@ -279,11 +279,11 @@ def watch_cmd(host, ci_base, exclude, jobid_file, no_deploy_check):
 )
 @click.option("--json", "as_json", is_flag=True, help='Emit JSON ({"command": ...}).')
 def show_register_cmd(url, name, token, labels, work, runner_group, no_replace, as_json):
-    """Show the ``config.sh`` command that registers a runner WITH ``scitex-ci``.
+    """Show a runner registration command with required CI route labels.
 
     \b
-    The label the ci-template ``runs-on: [self-hosted, scitex-ci]`` selects
-    on is baked into every command this prints, so a re-registered or
+    The labels selected by shared and org CPU workflows are baked into every
+    command this prints, so a re-registered or
     freshly-stood-up runner can never drift back to the un-labelled state
     that queues a repo's CI forever (the 2026-06-26 label-drift outage).
     Print-only: run the emitted command on the cluster in the runner's
@@ -295,7 +295,8 @@ def show_register_cmd(url, name, token, labels, work, runner_group, no_replace, 
           --url https://github.com/ywatanabe1989/scitex-hpc \\
           --name scitex-hpc --work /tmp/scitex-ci-runner-work/scitex-hpc
       ./config.sh --unattended --url https://github.com/... --token <TOKEN> \\
-          --name scitex-hpc --labels spartan-cpu,scitex-ci --work ... --replace
+          --name scitex-hpc --labels spartan-cpu,scitex-ci,scitex-org-cpu \\
+          --work ... --replace
     """
     command = build_register_command(
         url=url,

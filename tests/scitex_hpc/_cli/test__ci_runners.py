@@ -161,7 +161,7 @@ def test_watch_no_runners_exits_2_naming_ci_base(capsys):
     assert rc == 2 and "no runners" in err and CI_BASE in err
 
 
-def test_show_register_bakes_scitex_ci_label(capsys):
+def test_show_register_bakes_shared_ci_route_labels(capsys):
     # Arrange
     argv = [
         "ci-runners",
@@ -175,7 +175,8 @@ def test_show_register_bakes_scitex_ci_label(capsys):
     rc = main(argv)
     # Assert — the label the ci-template selects on is always emitted
     out = capsys.readouterr().out
-    assert rc == 0 and "--labels spartan-cpu,scitex-ci" in out
+    expected = "--labels spartan-cpu,scitex-ci,scitex-org-cpu"
+    assert rc == 0 and expected in out
 
 
 def test_show_register_requires_url(capsys):

@@ -46,6 +46,15 @@ try:
 except ImportError:  # pragma: no cover — only on ancient Pythons
     __version__ = "0.0.0+local"
 from ._config import HPC_DEFAULTS, JobConfig
+from ._customer_policy import (
+    AssociationPolicyEvidence,
+    CustomerPolicyEvidence,
+    CustomerPolicyRequirements,
+    JobAllocationEvidence,
+    QosPolicyEvidence,
+    TresValue,
+    validate_customer_policy,
+)
 from ._dispatch import sbatch, srun
 from ._job_stats import job_stats
 from ._liveness import LivenessResult, job_liveness
@@ -57,7 +66,12 @@ from ._sync import sync
 __all__ = [
     "__version__",
     "HPC_DEFAULTS",
+    "AssociationPolicyEvidence",
+    "CustomerPolicyEvidence",
+    "CustomerPolicyRequirements",
     "JobConfig",
+    "JobAllocationEvidence",
+    "QosPolicyEvidence",
     "LivenessResult",
     "Reservation",
     "detect_module_system",
@@ -70,4 +84,6 @@ __all__ = [
     "sbatch",
     "srun",
     "sync",
+    "TresValue",
+    "validate_customer_policy",
 ]

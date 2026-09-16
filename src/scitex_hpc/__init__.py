@@ -51,6 +51,8 @@ from ._customer_policy import (
     CustomerPolicyEvidence,
     CustomerPolicyRequirements,
     JobAllocationEvidence,
+    QosPolicyEvidence,
+    TresValue,
     validate_customer_policy,
 )
 from ._dispatch import sbatch, srun
@@ -69,6 +71,7 @@ __all__ = [
     "CustomerPolicyRequirements",
     "JobConfig",
     "JobAllocationEvidence",
+    "QosPolicyEvidence",
     "LivenessResult",
     "Reservation",
     "detect_module_system",
@@ -81,5 +84,6 @@ __all__ = [
     "sbatch",
     "srun",
     "sync",
+    "TresValue",
     "validate_customer_policy",
 ]

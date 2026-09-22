@@ -105,6 +105,10 @@ scitex_hpc = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--disable-warnings"]
+markers = [
+    "smoke: fast subprocess-driven CLI happy-path tests (<60s).",
+    "e2e: end-to-end workflows against real subsystems (loopback only, no network; gated via RUN_E2E=1).",
+]
 
 [tool.coverage.run]
 parallel = true

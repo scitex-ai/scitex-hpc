@@ -12,7 +12,7 @@ carrying the reasoning behind several fixes that were expensive to find:
   installed-but-unreachable and every serve job died at walltime (a measured
   9-hour gap between one job ending and its replacement being started by hand);
 - `ControlMaster=no` / `ControlPath=none` on the tunnel, without which `ssh -R`
-  attaches to an existing mux master, exits 0 in two seconds, and leaves the
+  attaches to an existing mux primary, exits 0 in two seconds, and leaves the
   forward's lifetime tied to something other than this job;
 - node-local cache paths, because `/data/gpfs/projects/punim0264` sits at 99%
   of its 8,000,000-file inode quota and anything cache-shaped written there

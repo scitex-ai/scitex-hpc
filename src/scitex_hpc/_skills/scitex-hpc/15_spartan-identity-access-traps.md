@@ -22,15 +22,15 @@ opened before the thing you are debugging happened.
 
 An ssh **ControlMaster** (connection multiplexing — `ControlPath`/`ControlPersist`,
 on by default in many configs) reuses one TCP connection for later `ssh` calls.
-The user's group vector is fixed when that master session **authenticates**. If
-a group is revoked afterwards, every command riding the existing master keeps
+The user's group vector is fixed when that primary session **authenticates**. If
+a group is revoked afterwards, every command riding the existing primary keeps
 the **old** vector: `id -Gn` still lists the group, and file access still
 succeeds — because the kernel is enforcing credentials granted at login, not
 re-resolving LDAP per command.
 
 A **fresh** connection gets the current truth. So the same command, on the same
 host, minutes apart, gives opposite answers depending only on whether it reused
-the master.
+the primary.
 
 **The tell:** *"but it worked an hour ago"* / *"it works on login1 but not
 login2"* / *"it's intermittent"*. That is not a flap — that is one cached
@@ -44,7 +44,7 @@ grows with time.
 ## Probe authoritatively
 
 ```bash
-# 1. Bypass the master — re-probe on a genuinely fresh connection.
+# 1. Bypass the primary — re-probe on a genuinely fresh connection.
 ssh -o ControlPath=none host 'id; getent passwd $USER; getent group <grp>'
 
 # 2. Compare against a node you have NOT touched this session.

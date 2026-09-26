@@ -1,0 +1,49 @@
+name: ci
+
+# ============================================================================
+# CANONICAL CI — IDENTICAL across every scitex ecosystem repo.
+# Synced by `scitex-dev ecosystem sync-workflows`; do not edit per-repo (drift
+# is reverted). Package-agnostic — the package name is derived from the
+# checkout, so there is nothing to substitute here.
+#
+# Migrated to org-level reusable workflows (scitex-ai/.github, 2026-07-10
+# fleet-wide CI-incident remediation — see scitex-ai/scitex-stats PR #69 for
+# the ground-truth pilot). Each job below is now a thin `uses:` caller into
+# scitex-ai/.github/.github/workflows/<name>.yml@main with `secrets: inherit`;
+# the runner/install/test logic now lives centrally in that repo.
+# ============================================================================
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 17 * * *" # nightly 17:00 UTC (~02:00 JST), off-peak
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest-matrix:
+    # New required-status-check contexts: "pytest-matrix / pytest-matrix-on-ubuntu-py3.11",
+    # "pytest-matrix / pytest-matrix-on-ubuntu-py3.12", "pytest-matrix / pytest-matrix-on-ubuntu-py3.13"
+    uses: scitex-ai/.github/.github/workflows/pytest-matrix.yml@main
+    secrets: inherit
+
+  import-smoke:
+    # New required-status-check context: "import-smoke / import-smoke-on-ubuntu-py3-12"
+    uses: scitex-ai/.github/.github/workflows/import-smoke.yml@main
+    secrets: inherit
+
+  quality-audit:
+    # New required-status-check context: "quality-audit / audit"
+    uses: scitex-ai/.github/.github/workflows/quality-audit.yml@main
+    secrets: inherit
+
+  rtd-sphinx-build:
+    # New required-status-check context: "rtd-sphinx-build / docs-sphinx"
+    uses: scitex-ai/.github/.github/workflows/rtd-sphinx-build.yml@main
+    secrets: inherit

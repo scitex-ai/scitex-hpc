@@ -1,0 +1,22 @@
+[Unit]
+Description=Detect drift between the hoist proxy's routed pool and what is actually serving
+Documentation=https://github.com/scitex-ai/scitex-hpc
+# PREREQUISITE, and the reason this unit is NOT installed on compute-04 yet:
+# it needs an alarm sink. Measured 2026-08-29 on compute-04 — there is NO
+# scitex-unit-failed@ target, NO ~/.local/bin/scitex-ci-alarm, and the host's
+# own monitors key on CCT_ALARM_CMD which is unset in both systemd and a login
+# shell. Installing this here today would produce a unit that exits 3 on every
+# run. That exit is CORRECT (a monitor that cannot report is broken) but a
+# permanently-failing unit is noise, not signal.
+# Uncomment when a sink exists on the host this runs on:
+# OnFailure=scitex-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+# 0 clean · 1 DRIFT PRESENT (the monitor working) · 2 failed look (unresolvable
+# unit, or curl produced no output) · 3 cannot report (no alarm sink, or the
+# send failed). Only 0 and 1 are success.
+SuccessExitStatus=0 1
+ExecStart=%h/.scitex/hpc/scripts/hoist-pool-drift-watch.sh
+Nice=19
+IOSchedulingClass=idle

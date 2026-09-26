@@ -15,7 +15,9 @@ try:
 except ImportError as e:  # pragma: no cover — fastmcp is optional
     raise ImportError(
         "fastmcp is required for scitex-hpc MCP support.\n"
-        "Install with: pip install scitex-hpc[mcp]"
+        "Install with: pip install 'scitex-hpc[all]'\n"
+        "(the separate mcp extra was removed under PS-225; installing it now "
+        "exits 0, warns, and installs nothing)"
     ) from e
 
 mcp = FastMCP("scitex-hpc")
@@ -161,6 +163,20 @@ def poll_job(job_id: str, host: str | None = None) -> dict:
 
     cfg = _make_config(project="", host=host)
     return _poll(cfg, job_id)
+
+
+@mcp.tool()
+def job_stats(job_id: str, host: str | None = None) -> dict:
+    """Per-job (and per-array-task) sacct resource report.
+
+    Returns ``{"jobs": [<record>, ...]}`` — one record per base JobID with
+    elapsed / MaxRSS / ReqMem / disk IO plus derived signals (mem_ratio,
+    walltime_ratio, oom_killed, timed_out, mem_tight, walltime_tight).
+    """
+    from .._job_stats import job_stats as _stats
+
+    cfg = _make_config(project="", host=host)
+    return _stats(cfg, job_id)
 
 
 @mcp.tool()

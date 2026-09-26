@@ -1,0 +1,17 @@
+[Unit]
+Description=Catch-it-live monitor for shared punim0264 tree deletions
+Documentation=card:spartan-shared-tree-catch-it-live-monitor
+# WHY: ~/.scitex/hpc/, ~/.scitex/dev/containers/ and the clew for_solver roots
+# have vanished before and every post-hoc attempt to identify the deleter
+# failed. This catches the NEXT one while it is happening.
+
+[Service]
+Type=oneshot
+ExecStart=%h/.scitex/hpc/scripts/check_shared_tree.sh
+# exit 1 means "a path vanished" — that is the monitor WORKING, not failing.
+# Without this, systemd marks the unit failed on a true positive and the timer
+# keeps running but every alarm also looks like a broken unit.
+SuccessExitStatus=0 1
+# Never let the monitor itself become the load problem on a shared host.
+Nice=19
+IOSchedulingClass=idle

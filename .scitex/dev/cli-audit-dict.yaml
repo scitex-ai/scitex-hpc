@@ -1,0 +1,5 @@
+# cli-audit-dict.yaml — package-specific tokens for scitex-dev's cli-audit
+# (§1d, unrecognized-noun check). Additive only: never reclassifies or
+# overrides the canonical catalog.
+nouns:
+  - walltime

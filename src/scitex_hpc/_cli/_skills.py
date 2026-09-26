@@ -1,4 +1,8 @@
-"""``scitex-hpc skills`` group — list / get / install agent-facing skills (§1a).
+"""``scitex-hpc dev skills`` group — list / get / install agent-facing skills (§1a).
+
+Mounted under ``dev`` per §13 (self-maintenance surfaces are housekeeping, not
+domain). The bare ``scitex-hpc skills`` spelling still works as a hidden
+warn-forward alias for one minor-version cycle.
 
 Self-contained. Walks the package's own ``_skills/scitex-hpc/`` dir.
 """
@@ -35,10 +39,10 @@ def skills_group(ctx) -> None:
 
     \b
     Examples:
-      $ scitex-hpc skills list
-      $ scitex-hpc skills get 01_installation
-      $ scitex-hpc skills install                  # → ~/.scitex/dev/skills/scitex-hpc/
-      $ scitex-hpc skills install --claude-symlink # also expose to ~/.claude/skills/scitex/
+      $ scitex-hpc dev skills list
+      $ scitex-hpc dev skills get 01_installation
+      $ scitex-hpc dev skills install                  # → ~/.scitex/dev/skills/scitex-hpc/
+      $ scitex-hpc dev skills install --claude-symlink # also expose to ~/.claude/skills/scitex/
     """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -51,8 +55,8 @@ def skills_list(as_json: bool) -> None:
 
     \b
     Example:
-      $ scitex-hpc skills list
-      $ scitex-hpc skills list --json
+      $ scitex-hpc dev skills list
+      $ scitex-hpc dev skills list --json
     """
     root = _skills_root()
     files = _list_skill_files(root)
@@ -77,8 +81,8 @@ def skills_get(name: str, as_json: bool) -> None:
 
     \b
     Example:
-      $ scitex-hpc skills get 01_installation
-      $ scitex-hpc skills get 02_quick-start --json
+      $ scitex-hpc dev skills get 01_installation
+      $ scitex-hpc dev skills get 02_quick-start --json
     """
     root = _skills_root()
     target = name[:-3] if name.endswith(".md") else name
@@ -134,9 +138,9 @@ def skills_install(
 
     \b
     Example:
-      $ scitex-hpc skills install
-      $ scitex-hpc skills install --claude-symlink
-      $ scitex-hpc skills install --no-link --dest /tmp/scitex-hpc-skills
+      $ scitex-hpc dev skills install
+      $ scitex-hpc dev skills install --claude-symlink
+      $ scitex-hpc dev skills install --no-link --dest /tmp/scitex-hpc-skills
     """
     del yes
     src = _skills_root().resolve()

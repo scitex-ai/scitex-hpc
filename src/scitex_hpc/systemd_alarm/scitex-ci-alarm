@@ -1,0 +1,50 @@
+#!/bin/bash -l
+# The alarm SINK the whole rail terminates in.
+#
+# WHY THIS FILE IS IN THE REPO. PR #97 version-controlled the OnFailure TARGET
+# (scitex-unit-failed@.service) on the argument that "an alarm rail that lives
+# only in a dotdir is one host migration from being un-rebuildable, and nothing
+# would say so". That fix was half-done: the target was committed, and the sink
+# it execs was left in one host's ~/.local/bin. Five version-controlled files
+# name `scitex-ci-alarm`; none of them shipped it. Measured 2026-08-30 —
+# spartan-login1 had it, compute-04 did not, and the rail therefore could not be
+# stood up on the second host at all.
+#
+# WHY A LOGIN SHELL (-l), AND DO NOT REMOVE IT. A systemd --user unit inherits
+# no `module load`. On an EasyBuild cluster the scitex console-script's shebang
+# points at an interpreter under /apps/easybuild-*/, which without the module
+# environment cannot find its shared libraries and exits 127 — while the file is
+# present and executable the whole time. Measured 2026-08-18 and again
+# 2026-08-30: identical commands, rc=127 under systemd, rc=0 under `bash -lc`.
+#
+# WHY THE BINARY IS RESOLVED AND NOT HARDCODED. The original read
+# `/home/ywatanabe/.env-3.11/bin/scitex`, which is correct on spartan-login1 and
+# absent on compute-04 (where it lives in ~/.venv). A verbatim copy of the
+# working file would have been a broken install that looked like a deployment.
+#
+# Override with $SCITEX_ALARM_BIN when neither default is right.
+
+set -uo pipefail
+
+_ALARM_TRIED=()
+
+for _cand in \
+  "${SCITEX_ALARM_BIN:-}" \
+  "$HOME/.env-3.11/bin/scitex" \
+  "$HOME/.venv/bin/scitex" \
+  "$(command -v scitex 2>/dev/null || true)"
+do
+  [ -n "$_cand" ] || continue
+  _ALARM_TRIED+=("$_cand")
+  if [ -x "$_cand" ]; then
+    exec "$_cand" notification send "$@"
+  fi
+done
+
+# An alarm that cannot send is a FAILURE, never a silent no-op: exiting 0 here
+# would report a healthy run to the very rail that exists to notice failures,
+# and the caller would be told nothing twice over.
+echo "scitex-ci-alarm: no scitex binary resolved; the alarm CANNOT be sent. Tried: ${_ALARM_TRIED[*]:-<none>}. Set \$SCITEX_ALARM_BIN to the scitex executable on this host." >&2
+exit 3
+
+# EOF

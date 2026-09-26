@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic hoist-pool drift check
+
+[Timer]
+# Interval, not OnCalendar. Pool membership changes when an allocation lands or
+# dies, which is not a wall-clock event, and this fleet has already been bitten
+# by a host whose systemd reports a different timezone than the analysis.
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

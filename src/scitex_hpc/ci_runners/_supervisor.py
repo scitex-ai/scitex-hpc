@@ -1,0 +1,413 @@
+"""Generate the sbatch *hold body* that supervises the runner fleet.
+
+The supervisor runs as the sbatch job's main process on ONE dedicated
+compute node. For every runner it spawns a **keep-alive loop**:
+
+    while job alive:
+        ./run.sh            # the GitHub Actions runner (blocks)
+        # run.sh exited (crash, deregister, transient network death)
+        log the exit, sleep <backoff>, loop -> relaunch
+
+so a runner that dies is back within ``<backoff>`` seconds without any
+human or cron involvement. The supervisor then ``wait``s on all loops;
+when SLURM signals the job (walltime, scancel) every loop is torn down
+with its cgroup.
+
+This body is handed to :meth:`scitex_hpc.Reservation.book` as
+``hold_body`` together with ``persistent=True``; the Reservation layer
+wraps it with the SIGUSR1 walltime-resubmit trap, so the fleet survives
+the cluster walltime cap indefinitely.
+
+Pure string generation — no SSH, no SLURM, fully unit-testable.
+"""
+
+from __future__ import annotations
+
+from ._fleet import FleetSpec, RunnerSpec
+
+# Environment hardening every runner needs, captured ONCE here instead of
+# copy-pasted across the five band-aid scripts. Scrubs the EasyBuild
+# module env (which broke runner Python/Node resolution), pins a
+# user-site-free interpreter, and keeps ``_work`` off the home quota.
+_ENV_HARDENING = r"""# --- scitex-ci shared runner env hardening ---
+source "$HOME/.bashrc" 2>/dev/null || true
+module purge 2>/dev/null || true
+# Strip inherited personal secrets. Sourcing the interactive profile above
+# pulls the operator's credentials (API keys, OAuth tokens, email/SSO/Visa
+# passwords) into the runner env, where EVERY CI job -- including any PR
+# workflow -- could read and exfiltrate them off these shared runners. CI
+# jobs get tools + PATH only; real per-job secrets must come from GitHub
+# Actions secrets, never the runner profile. compgen -v is expanded once,
+# so unsetting during the loop is safe.
+for _name in $(compgen -v 2>/dev/null); do
+  case "$_name" in
+    *PASSWORD*|*PASSWD*|*TOKEN*|*SECRET*|*API_KEY*|*APIKEY*|*_KEY|*_KEYS|*BEARER*|*CREDENTIAL*|*CONSUMER_KEY*|*ACCESS_KEY*|*PRIVATE_KEY*)
+      unset "$_name" 2>/dev/null || true ;;
+  esac
+done
+unset _name
+unset PYTHONHOME PYTHONPATH
+export PYTHONNOUSERSITE=1
+_scrub() { echo "${1:-}" | tr ':' '\n' | grep -v easybuild | grep -v '^$' | tr '\n' ':' | sed 's/:$//'; }
+export LD_LIBRARY_PATH="$(_scrub "${LD_LIBRARY_PATH:-}")"
+# ~/.bin holds gh; ~/.bashrc only adds it for interactive shells, so prepend explicitly here or release-tail gh 127-fails in this non-interactive supervisor.
+export PATH="$HOME/.bin:$HOME/.local/bin:$HOME/.cargo/bin:$(_scrub "${PATH:-}")"
+export AGENT_TOOLSDIRECTORY="__TOOLCACHE__"
+export RUNNER_TOOL_CACHE="__TOOLCACHE__"
+mkdir -p "__WORK_ROOT__"
+# CI tmp on node-local disk, NOT $HOME. The sourced login profile sets
+# TMPDIR=$HOME/.cache/tmp; under $HOME a pytest tmp_path lets scitex's
+# project-type classifier walk up into the home ``.scitex`` tree and
+# mis-classify a pip project as ``research`` (self-hosted-only test
+# failures). A node-local TMPDIR also keeps tmp off the home quota and
+# the network FS. Must come AFTER the .bashrc source above to win.
+export TMPDIR="__WORK_ROOT__/tmp"
+export TMP="$TMPDIR"
+export TEMP="$TMPDIR"
+mkdir -p "$TMPDIR"
+# Per-job _temp clear. A long-lived runner runs matrix jobs back-to-back
+# without restarting; the runner's own .NET cleanup intermittently fails
+# in this env, leaving _work/_temp so the next job crashes at startup
+# (IOException: _temp already exists). This JOB_COMPLETED hook rm -rf's
+# the temp AFTER each job (safe — the finished job's temp is gone), so
+# the next job inits clean. printf (not a heredoc) to avoid nesting
+# inside the body's own heredoc.
+printf '%s\n' '#!/usr/bin/env bash' '[ -n "${RUNNER_TEMP:-}" ] && rm -rf "$RUNNER_TEMP" 2>/dev/null' '[ -n "${RUNNER_WORK_DIRECTORY:-}" ] && rm -rf "$RUNNER_WORK_DIRECTORY/_temp" 2>/dev/null' 'exit 0' > "__HOOK_PATH__"
+chmod +x "__HOOK_PATH__"
+export ACTIONS_RUNNER_HOOK_JOB_COMPLETED="__HOOK_PATH__"
+# actions/checkout unconditionally runs `git config --global --add
+# safe.directory <workspace>` on EVERY job, with no dedup check (upstream
+# behavior since the CVE-2022-24765 fix). Across 70+ runners and thousands
+# of job runs this bloats the operator's real ~/.gitconfig -- which is a
+# symlink into the dotfiles SSoT -- to 16k+ duplicate lines (found
+# 2026-07-09). GIT_CONFIG_GLOBAL redirects ALL --global git config
+# reads+writes for this runner's shell (and everything the runner spawns) to
+# a node-local scratch copy, seeded ONCE from the real file so identity
+# (user.name/user.email) and credential settings still resolve -- CI jobs
+# just stop being able to write back into the tracked source.
+export GIT_CONFIG_GLOBAL="__WORK_ROOT__/git-config-global-ci.ini"
+[ -f "$GIT_CONFIG_GLOBAL" ] || cp -f "$HOME/.gitconfig" "$GIT_CONFIG_GLOBAL" 2>/dev/null || : > "$GIT_CONFIG_GLOBAL"
+"""
+
+
+# Idempotent, non-fatal Python tool-cache provisioning. ``setup-python@v5``
+# resolves interpreters from ``RUNNER_TOOL_CACHE``; a fresh or reinstalled
+# node starts EMPTY, so a job that ``setup-python``s 3.x would fail. We lay
+# down portable CPython (python-build-standalone via ``uv``) in the exact
+# layout setup-python expects ($CACHE/Python/<ver>/x64 + ``x64.complete``),
+# so the node SELF-HEALS instead of needing a manual cache build. Spartan is
+# RHEL, which actions/python-versions has no build for (hence pbs, which is
+# distro-portable). The interpreters' ``EXTERNALLY-MANAGED`` marker is KEPT:
+# the cache is shared + read-only across all runners, so per-job ``venv``s do
+# the installing (a stray base ``pip install`` would race the shared cache).
+# Every step is guarded — a provisioning hiccup must never block runner
+# launch. Runs ONCE at supervisor start, before any runner is spawned, so no
+# job can be reading an interpreter while it is laid down.
+_TOOLCACHE_PROVISION = r"""# --- scitex-ci Python tool-cache provisioning (idempotent) ---
+_provision_toolcache() {
+  local cache="__TOOLCACHE__" uvdir="__WORK_ROOT__/tooling" src="__WORK_ROOT__/hostedtoolcache-src"
+  local uv="$uvdir/uv" need="" v p ok
+  # Verify the interpreter actually RESOLVES + runs, not just that the
+  # x64.complete marker exists. If hostedtoolcache-src is deleted, the marker
+  # and x64 symlink survive but DANGLE, so setup-python resolves a dead link
+  # ("version x64 not found") fleet-wide (2026-07-06 outage). A broken/missing
+  # interpreter re-provisions and relays the symlink onto node-local src.
+  for v in 3.11 3.12 3.13; do
+    ok=""
+    for p in "$cache"/Python/"$v".*/x64/bin/python3; do
+      [ -x "$p" ] && "$p" --version >/dev/null 2>&1 && { ok=1; break; }
+    done
+    [ -n "$ok" ] || need="$need $v"
+  done
+  [ -z "$need" ] && return 0
+  echo "[scitex-ci] provisioning Python tool-cache:$need" >&2
+  mkdir -p "$uvdir" "$src" "$cache/Python" 2>/dev/null || true
+  if [ ! -x "$uv" ]; then
+    curl -LsSf -m 120 https://astral.sh/uv/install.sh \
+      | env UV_INSTALL_DIR="$uvdir" INSTALLER_NO_MODIFY_PATH=1 sh >/dev/null 2>&1 || return 0
+  fi
+  [ -x "$uv" ] || return 0
+  UV_PYTHON_INSTALL_DIR="$src" "$uv" python install $need >/dev/null 2>&1 || return 0
+  local d full dst
+  for d in "$src"/cpython-3.*-linux-*-gnu; do
+    [ -x "$d/bin/python3" ] || continue
+    full="$("$d/bin/python3" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])' 2>/dev/null)" || continue
+    [ -n "$full" ] || continue
+    dst="$cache/Python/$full/x64"
+    mkdir -p "$cache/Python/$full" 2>/dev/null || true
+    rm -rf "$dst" 2>/dev/null || true
+    ln -sfn "$d" "$dst"
+    [ -e "$dst/bin/python" ] || ln -sfn python3 "$dst/bin/python" 2>/dev/null || true
+    : > "$cache/Python/$full/x64.complete" 2>/dev/null || true
+  done
+}
+_provision_toolcache || true
+"""
+
+
+def runner_keepalive_fragment(
+    runner: RunnerSpec,
+    *,
+    toolcache: str,
+    work_root: str,
+    backoff: int,
+) -> str:
+    """Return the shell for ONE runner's keep-alive loop (backgrounded).
+
+    The loop:
+      * cd's into the install dir with a per-runner ``_work`` dir off the
+        home quota and the runner's ``shims`` on PATH,
+      * runs ``./run.sh`` in the foreground (it blocks while connected),
+      * on exit, appends a timestamped restart line to ``keepalive.log``
+        and sleeps ``backoff`` before relaunching,
+      * exits cleanly only when the supervisor is being torn down (a
+        sentinel file the supervisor removes on shutdown), so SLURM
+        teardown doesn't trigger a pointless final relaunch.
+    """
+    tag = runner.name
+    work = f"{work_root}/{tag}"
+    # ``$$`` here is the supervisor PID, shared across loops — fine, each
+    # loop gets its own ``_work`` subdir by tag so they never collide.
+    return (
+        f"_keepalive_{_safe(tag)}() {{\n"
+        f'  local d="{runner.dir}"\n'
+        f'  local wd="{work}"\n'
+        f'  mkdir -p "$wd"\n'
+        # The runner IGNORES RUNNER_WORK_DIRECTORY and uses
+        # <install-dir>/_work, which is on GPFS (a network FS) where the
+        # _temp delete/recreate races -> startup IOException "_temp already
+        # exists". Symlink _work to local xfs so the runner-side per-job
+        # temp-init is atomic, eliminating the GPFS race (also fixes the
+        # cancelled-job leftover case, independent of hook timing).
+        # ln -sfn will NOT replace a real directory (it nests inside it),
+        # and rm -rf races with a dying old runner still holding _work. mv
+        # (atomic rename on the same FS) always succeeds even on a busy dir,
+        # so move the real _work aside, then symlink; background-clean the
+        # moved copy.
+        f'  if [ ! -L "$d/_work" ]; then '
+        f'mv "$d/_work" "$d/_work.gpfs-stale-$$" 2>/dev/null; '
+        f'rm -rf "$d/_work.gpfs-stale-$$" 2>/dev/null & fi\n'
+        f'  ln -sfn "$wd" "$d/_work"\n'
+        f'  echo "PID $$ supervising {tag} on $(hostname) at $(date -u +%FT%TZ)" '
+        f'> "{runner.pidfile}"\n'
+        f'  while [ -f "{_sentinel()}" ]; do\n'
+        f'    rm -f "$d/.needs-restart"\n'
+        f'    echo "[$(date -u +%FT%TZ)] starting {tag}" >> "{runner.log}"\n'
+        # Clear a stale _work/_temp left by a prior session: the GitHub
+        # runner's TempDirectoryManager.InitializeTempDirectory fails at
+        # startup ("_temp already exists") if it survives a restart.
+        f'    rm -rf "$wd/_temp"\n'
+        # Per-runner global git config, re-seeded fresh each run.sh session.
+        #
+        # actions/checkout runs `git config --global --add safe.directory <p>`
+        # on EVERY job. The whole fleet shares one $HOME, and ~/.gitconfig is a
+        # SYMLINK into the operator's dotfiles SSoT, so those `--add` lines
+        # accumulate there without bound and sync to every host. Measured
+        # 2026-07-29: 35,327 safe.directory entries, only 206 unique (~171x
+        # duplication), in a 4.3 MB file that grew ~2.5 KB in one minute.
+        #
+        # `--add` is a read-modify-write of the WHOLE file under
+        # `.gitconfig.lock`, so lock hold time scales with file size and the
+        # failure COMPOUNDS: more runs -> bigger file -> longer hold -> more
+        # collisions. That is the 255-exit race, and why occasional flakes on
+        # 07-17 became ~28 repos red simultaneously on 07-23.
+        #
+        # Fixed HERE, at the launcher, rather than per-workflow: this is the
+        # one place $HOME is handed to every runner, so it also covers the
+        # ~58 per-repo callers that no workflow-level env var reaches.
+        # `include.path` keeps the operator's real identity (user.name/email)
+        # readable while writes land in the runner's own node-local file.
+        f'    printf "[include]\\npath = %s\\n" "$HOME/.gitconfig" '
+        f'> "$wd/.gitconfig"\n'
+        # Per-runner TOOL CACHE, with the Python subtree still SHARED.
+        #
+        # The supervisor provisions Python ONCE at start, before any runner
+        # exists, and the module docstring calls the cache "shared +
+        # read-only across all runners". That invariant holds for Python and
+        # has NEVER held for uv: `_provision_toolcache` only lays down
+        # Python, so `$cache/uv/` is written entirely by `setup-uv`, from
+        # jobs, at job runtime -- the exact concurrent write the invariant
+        # says cannot happen.
+        #
+        # Measured 2026-07-29/30: uv shipped 12 releases in ~5 weeks
+        # (0.11.23 -> 0.12.0). Each new version misses the shared cache, so
+        # the first jobs to request it all install into the same path at
+        # once and die `exit 127` on a binary another job is mid-write:
+        #   07-23  uv 0.11.31 missing -> 2 legs dead -> appeared 17 min later
+        #   07-29  uv 0.12.0  missing -> develop reddened
+        # It presents as an intermittent, PR-specific flake and is neither;
+        # a re-run is a coin flip that wins once someone else finishes.
+        #
+        # Python stays shared via symlink: 3 interpreters x 80 runners would
+        # be pure duplication against an inode quota already at ~93%, and
+        # nothing writes Python at job time. Everything setup-* DOES write
+        # lands in the runner's own dir, so there is no shared write path
+        # left to race on.
+        f'    mkdir -p "$wd/toolcache"\n'
+        f'    [ -e "$wd/toolcache/Python" ] || '
+        f'ln -sfn "{toolcache}/Python" "$wd/toolcache/Python"\n'
+        # Per-runner gh config dir — the THIRD face of the shared-$HOME class.
+        #
+        # `gh` parses ~/.config/gh/config.yml at STARTUP, before it looks at
+        # any token. The operator's copy is corrupt, so `gh` aborts before
+        # authentication and no secret can rescue it: scitex-logging's PR #24
+        # has been blocked on exactly this since 2026-07-12, and the same
+        # class was fixed repo-by-repo (scitex-ui#68, scitex-math#5) instead
+        # of here, where $HOME is actually handed to every runner.
+        #
+        # Deliberately NOT seeded from the real config. The other two faces
+        # seed (GIT_CONFIG_GLOBAL uses include.path so identity resolves) —
+        # copying here would import the corruption that IS the bug. CI auth
+        # comes from GH_TOKEN in Actions secrets, which `gh` reads from the
+        # environment and which needs no config file; an empty dir lets gh
+        # write its own defaults on first use.
+        f'    mkdir -p "$wd/gh"\n'
+        f'    ( cd "$d" \\\n'
+        f'        && RUNNER_WORK_DIRECTORY="$wd" \\\n'
+        f'           GIT_CONFIG_GLOBAL="$wd/.gitconfig" \\\n'
+        f'           RUNNER_TOOL_CACHE="$wd/toolcache" \\\n'
+        f'           AGENT_TOOLSDIRECTORY="$wd/toolcache" \\\n'
+        f'           GH_CONFIG_DIR="$wd/gh" \\\n'
+        f'           PATH="$d/shims:$HOME/.bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH" \\\n'
+        f'           ./run.sh ) >> "{runner.log}" 2>&1\n'
+        f'    rc=$?\n'
+        f'    echo "[$(date -u +%FT%TZ)] {tag} run.sh exited rc=$rc; '
+        f'restart in {backoff}s" >> "{runner.log}"\n'
+        f'    [ -f "{_sentinel()}" ] || break\n'
+        f"    sleep {backoff}\n"
+        f"  done\n"
+        f'  echo "[$(date -u +%FT%TZ)] {tag} keep-alive loop exiting" '
+        f'>> "{runner.log}"\n'
+        f"}}\n"
+        f"_keepalive_{_safe(tag)} &\n"
+    )
+
+
+def diag_pruner_fragment(fleet: FleetSpec) -> str:
+    """Return a backgrounded loop that bounds each runner's ``_diag`` dir.
+
+    The GitHub runner writes a ``Worker_*.log`` per job plus rotating
+    ``Runner_*.log`` into ``<install>/_diag`` on GPFS. Across a long-lived
+    ``run.sh`` session these accumulate unbounded and consume shared-fileset
+    inodes — a contributor to the 2026-07-06 punim0264 inode wall that took
+    the whole CI fleet down (a Worker cannot even start when the fileset has
+    no free inodes). This loop keeps only the newest ``fleet.diag_keep`` of
+    each log kind per active runner, every ``fleet.diag_prune_interval``
+    seconds, until the supervisor sentinel is removed.
+
+    Pure log hygiene: it only ever deletes *older* diag logs (never the
+    active one — ``ls -t`` keeps the newest), and never touches ``_work`` or
+    any live job state. Runs as its own backgrounded loop (not the per-run
+    keep-alive) because a healthy runner keeps ``run.sh`` connected for days,
+    so a per-restart prune would almost never fire.
+    """
+    keep = fleet.diag_keep
+    interval = fleet.diag_prune_interval
+    # Space-joined install dirs (names are ``actions-runner-*`` — no spaces),
+    # matching how the rest of this module treats runner paths.
+    dirs = " ".join(f'"{r.dir}"' for r in fleet.active())
+    return (
+        "_scitex_ci_diag_pruner() {\n"
+        f"  while [ -f {_sentinel()} ]; do\n"
+        f"    for d in {dirs}; do\n"
+        f'      ls -t "$d"/_diag/Worker_*.log 2>/dev/null '
+        f"| tail -n +{keep + 1} | xargs -r rm -f 2>/dev/null\n"
+        f'      ls -t "$d"/_diag/Runner_*.log 2>/dev/null '
+        f"| tail -n +{keep + 1} | xargs -r rm -f 2>/dev/null\n"
+        "    done\n"
+        f"    sleep {interval}\n"
+        "  done\n"
+        "}\n"
+        "_scitex_ci_diag_pruner &\n"
+    )
+
+
+def build_supervisor_hold_body(fleet: FleetSpec) -> str:
+    """Assemble the full sbatch hold body that supervises ``fleet``.
+
+    Layout of the generated body:
+
+      1. env hardening (shared)
+      2. a sentinel file marking "supervisor live" (loops watch it)
+      3. one backgrounded keep-alive loop per active runner
+      4. a backgrounded ``_diag`` log pruner bounding each runner's log dir
+         (keeps GPFS inode use flat — see :func:`diag_pruner_fragment`)
+      5. a SIGTERM/SIGINT trap that removes the sentinel so loops exit
+         cleanly on scancel
+      6. ``wait`` — block as the job's main process until SLURM tears
+         the job down (or the resubmit trap fires, added by Reservation)
+
+    The returned string is the ``hold_body`` argument for
+    ``Reservation.book(..., persistent=True, hold_body=<this>)``.
+    """
+    active = fleet.active()
+    env = (
+        _ENV_HARDENING.replace("__TOOLCACHE__", fleet.toolcache)
+        .replace("__WORK_ROOT__", fleet.work_root)
+        .replace("__HOOK_PATH__", f"{fleet.work_root}/clear_temp_hook.sh")
+    )
+    provision = _TOOLCACHE_PROVISION.replace(
+        "__TOOLCACHE__", fleet.toolcache
+    ).replace("__WORK_ROOT__", fleet.work_root)
+    head = (
+        f"# === scitex-ci supervisor: {len(active)} runners ===\n"
+        f"{env}\n"
+        f"{provision}\n"
+        f'mkdir -p "$(dirname {_sentinel()})"\n'
+        f'echo "$(date -u +%FT%TZ) $(hostname)" > {_sentinel()}\n'
+        f"_scitex_ci_shutdown() {{ rm -f {_sentinel()}; }}\n"
+        f"trap _scitex_ci_shutdown TERM INT\n"
+        f'echo "[scitex-ci] supervisor up on $(hostname); launching '
+        f'{len(active)} runners" >&2\n'
+    )
+    loops = "".join(
+        runner_keepalive_fragment(
+            r,
+            toolcache=fleet.toolcache,
+            work_root=fleet.work_root,
+            backoff=fleet.restart_backoff,
+        )
+        for r in active
+    )
+    pruner = diag_pruner_fragment(fleet)
+    tail = (
+        '\necho "[scitex-ci] all keep-alive loops launched; supervising" >&2\n'
+        "# Block as the job's main process. Reservation(persistent=True)\n"
+        "# wraps this body with a SIGUSR1 walltime-resubmit trap; on\n"
+        "# resubmit a fresh supervisor takes over the new allocation.\n"
+        "#\n"
+        "# SERVE OUT THE FULL WALLTIME -- a BARE `wait` surrenders the\n"
+        "# allocation ~1h early. `wait` is interrupted by the USR1 trap: the\n"
+        "# handler submits the successor, `wait` RETURNS, this script falls\n"
+        "# off the end, and SLURM tears the job down while the successor is\n"
+        "# still queueing. Measured on the pooled supervisor: Timelimit\n"
+        "# 1-00:00:00 with Elapsed 22:59:5x on EVERY hop -- and the forfeited\n"
+        "# hour is exactly the window meant to cover the successor's queue\n"
+        "# wait, so each successor queued with NO runner online:\n"
+        "#     27225547  submitted 07-14T12:21  started 12:22:20      64s\n"
+        "#     27281296  submitted 07-15T11:21  started 13:24:27   2h 02m\n"
+        "#     27331011  submitted 07-16T12:24  started 07-17T04:27 16h 03m\n"
+        "#     27709706  submitted 07-21T00:26  never backfilled   OUTAGE\n"
+        "# (cluster-local; Spartan is UTC+10.) Re-entering `wait` keeps this\n"
+        "# allocation serving jobs until SLURM kills it at the boundary, so\n"
+        "# the successor queues while the service is still UP. The overlap is\n"
+        "# free: it uses time already allocated and previously wasted. This\n"
+        "# does NOT lengthen the walltime.\n"
+        f"while [ -f {_sentinel()} ]; do\n"
+        "  wait || true\n"
+        "  # `wait` also returns immediately once no children remain; bound\n"
+        "  # the loop so a fully-dead runner set cannot spin the CPU.\n"
+        "  sleep 5\n"
+        "done\n"
+    )
+    return head + loops + pruner + tail
+
+
+def _sentinel() -> str:
+    """Path to the supervisor-live sentinel (per-node, in /tmp)."""
+    return "/tmp/scitex-ci-supervisor.alive"
+
+
+def _safe(name: str) -> str:
+    """Make a runner name safe as a shell function-name suffix."""
+    return "".join(c if c.isalnum() else "_" for c in name)

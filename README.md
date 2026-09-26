@@ -137,12 +137,16 @@ res.release()                       # scancel + clear state
 <br>
 
 ```bash
-scitex-hpc reservations book dev-pool --host spartan --cpus 8 --mem 32G --time 7-0 --persistent
-scitex-hpc reservations list
-scitex-hpc reservations exec dev-pool 'hostname'
-scitex-hpc reservations attach dev-pool
-scitex-hpc reservations cancel dev-pool
+scitex-hpc lease book dev-pool --host spartan --cpus 8 --mem 32G --time 7-0 --persistent
+scitex-hpc lease list
+scitex-hpc lease exec dev-pool 'hostname'
+scitex-hpc lease attach dev-pool
+scitex-hpc lease cancel dev-pool
 ```
+
+> `reservations` is a **deprecated alias** for `lease` — existing
+> `scitex-hpc reservations …` callers keep working (with a one-line
+> deprecation notice on stderr), but `lease` is the documented name.
 
 </details>
 

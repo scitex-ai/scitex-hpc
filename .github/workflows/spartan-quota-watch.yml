@@ -1,0 +1,120 @@
+# Spartan fileset-quota early warning (card: spartan-inode-quota-early-warning).
+#
+# WHY: /data/gpfs/projects/punim0264 hit its 7,000,000-file FILESET inode quota
+# on 2026-07-03 (mass SAC state-db 'unable to open database file' mid-run) and
+# silently REFILLED to 100% within hours on 2026-07-04. The quota is path-based
+# (all groups count) and exhausts silently — every ~/.cache and ~/.scitex write
+# on the shared account EDQUOTs when it hits the wall. The fleet needs an alarm
+# BEFORE the wall, delivered over a channel agents actually see.
+#
+# HOW: scheduled run on the self-hosted Spartan runner (no Spartan crontab —
+# dotfiles-SSoT rule; the runner fleet is existing, supervised infra).
+# check_project_usage is a metadata-only quota query (no filesystem walk — safe
+# anywhere, per HPC etiquette). On breach of the WARN threshold this job FAILS
+# (red scheduled run) and opens/updates a pinned-title GitHub issue via the REST
+# API (curl + GITHUB_TOKEN; no gh-CLI dependency on the runner). Recovery runs
+# comment + close the issue.
+name: spartan-quota-watch
+
+on:
+  schedule:
+    - cron: "17 */6 * * *" # every 6h (17min offset avoids top-of-hour load)
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: spartan-quota-watch
+  cancel-in-progress: false
+
+jobs:
+  quota-watch:
+    runs-on: [self-hosted, Linux, X64, spartan-cpu]
+    timeout-minutes: 10
+    env:
+      WARN_PCT: "90"
+      PROJECTS: "punim0264 punim2354"
+      ISSUE_TITLE: "[quota-alert] Spartan fileset inode usage over threshold"
+    steps:
+      - name: Check fileset quotas (metadata-only)
+        id: check
+        shell: bash
+        run: |
+          set -uo pipefail
+          breach=0
+          report=""
+          for proj in $PROJECTS; do
+            line=$(/apps/common/bin/check_project_usage "$proj" 2>&1) || {
+              echo "::error::check_project_usage $proj failed: $line"
+              breach=1
+              report+="$proj: QUERY FAILED: $line"$'\n'
+              continue
+            }
+            # e.g. "punim0264 has used 6875GB out of 10001GB (68%) and 6398865 out of 7000000 files (91%) in /data/..."
+            files_pct=$(printf '%s' "$line" | sed -nE 's/.* files \(([0-9]+)%\).*/\1/p')
+            [ -n "$files_pct" ] || {
+              echo "::error::could not parse files%% for $proj from: $line"
+              breach=1
+              report+="$proj: PARSE FAILED: $line"$'\n'
+              continue
+            }
+            report+="$line"$'\n'
+            echo "$proj files=$files_pct% (warn at $WARN_PCT%)"
+            if [ "$files_pct" -ge "$WARN_PCT" ]; then
+              echo "::error::$proj fileset at $files_pct% of its file-count quota (>=$WARN_PCT%)"
+              breach=1
+            fi
+          done
+          {
+            echo "## Spartan fileset quota"
+            echo '```'
+            printf '%s' "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "breach=$breach"
+            echo "report<<EOF"
+            printf '%s' "$report"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open/update alert issue on breach, close on recovery
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BREACH: ${{ steps.check.outputs.breach }}
+          REPORT: ${{ steps.check.outputs.report }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          api() { curl -sf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
+          # Find an existing open alert issue by its pinned title.
+          existing=$(api "https://api.github.com/repos/$REPO/issues?state=open&per_page=100" |
+            python3 -c 'import json,sys,os; t=os.environ["ISSUE_TITLE"]; print(next((str(i["number"]) for i in json.load(sys.stdin) if i["title"]==t), ""))')
+          printf -v body 'Fileset quota status (%s) — incident doctrine: reclaim caches/stale runtime, keep temp node-local.\n\n```\n%s```\nRun: %s\n' \
+            "$(date -u +%FT%TZ)" "$REPORT" "$RUN_URL"
+          if [ "$BREACH" = "1" ]; then
+            if [ -n "$existing" ]; then
+              B="$body" python3 -c 'import json,os; print(json.dumps({"body": os.environ["B"]}))' |
+                api -X POST "https://api.github.com/repos/$REPO/issues/$existing/comments" -d @- >/dev/null
+              echo "updated alert issue #$existing"
+            else
+              B="$body" python3 -c 'import json,os; print(json.dumps({"title": os.environ["ISSUE_TITLE"], "body": os.environ["B"], "labels": ["incident","quota"]}))' |
+                api -X POST "https://api.github.com/repos/$REPO/issues" -d @- >/dev/null
+              echo "opened alert issue"
+            fi
+            echo "::error::Spartan fileset quota over $WARN_PCT% — failing loud (see issue + summary)"
+            exit 1
+          else
+            if [ -n "$existing" ]; then
+              printf -v rbody 'Recovered below %s%% (%s).\n\n```\n%s```\n' "$WARN_PCT" "$(date -u +%FT%TZ)" "$REPORT"
+              B="$rbody" python3 -c 'import json,os; print(json.dumps({"body": os.environ["B"]}))' |
+                api -X POST "https://api.github.com/repos/$REPO/issues/$existing/comments" -d @- >/dev/null
+              api -X PATCH "https://api.github.com/repos/$REPO/issues/$existing" -d '{"state":"closed"}' >/dev/null
+              echo "closed alert issue #$existing (recovered)"
+            fi
+            echo "quota healthy"
+          fi

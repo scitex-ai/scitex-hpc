@@ -34,7 +34,11 @@ def mcp_start(dry_run: bool, yes: bool):
         from .._mcp.server import mcp as mcp_server
     except ImportError as e:
         raise click.ClickException(
-            f"MCP not available. Install: pip install scitex-hpc[mcp]\n{e}"
+            "MCP not available. Install: pip install 'scitex-hpc[all]'\n"
+            "NOTE: the separate mcp extra was removed (PS-225). Installing it "
+            "now EXITS 0, warns, and installs nothing — so it will not fix "
+            "this.\n"
+            f"{e}"
         ) from e
     click.echo("Starting scitex-hpc MCP server (stdio)...")
     mcp_server.run()
@@ -56,7 +60,8 @@ def mcp_doctor():
 
         click.echo(f"  [OK] fastmcp v{fastmcp.__version__}")
     except ImportError:
-        click.echo("  [FAIL] fastmcp not installed (pip install scitex-hpc[mcp])")
+        click.echo("  [FAIL] fastmcp not installed — pip install 'scitex-hpc[all]'")
+        click.echo("         (the `mcp` extra was removed; [mcp] now installs nothing)")
         all_ok = False
     try:
         from .._mcp.server import mcp as _mcp  # noqa: F401
@@ -153,7 +158,12 @@ def mcp_install(as_json: bool, dry_run: bool, yes: bool):
         click.echo(
             _json.dumps(
                 {
-                    "install_command": "pip install scitex-hpc[mcp]",
+                    "install_command": "pip install 'scitex-hpc[all]'",
+                    "install_note": (
+                        "The separate mcp extra was removed (PS-225). "
+                        "Installing it now exits 0 with only a warning and "
+                        "installs nothing."
+                    ),
                     "config": config,
                     "verify_commands": ["scitex-hpc mcp doctor"],
                 },
@@ -166,7 +176,14 @@ def mcp_install(as_json: bool, dry_run: bool, yes: bool):
     click.echo()
     click.echo("Install scitex-hpc with MCP support:")
     click.echo()
-    click.secho("  pip install scitex-hpc[mcp]", fg="green")
+    click.secho("  pip install 'scitex-hpc[all]'", fg="green")
+    click.echo()
+    click.secho(
+        "  The separate mcp extra was removed (PS-225). Note that installing\n"
+        "  the old extra does NOT fail — it exits 0 with a warning and\n"
+        "  installs nothing, so it looks like it worked.",
+        fg="yellow",
+    )
     click.echo()
     click.echo("Add to your MCP client config (e.g., claude_desktop_config.json):")
     click.echo()

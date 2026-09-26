@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodic gitconfig drift census
+
+[Timer]
+# INTERVAL, not OnCalendar. spartan-login1's systemd reports JST while this
+# fleet's analysis is written in UTC/AEST, so a wall-clock schedule aimed at a
+# particular hour would fire faithfully at the wrong one. Measured on this host
+# 2026-08-16; the same reasoning is recorded on index-lock-census.timer.
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

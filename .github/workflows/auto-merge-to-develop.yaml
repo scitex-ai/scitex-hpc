@@ -1,0 +1,21 @@
+name: auto-merge-to-develop
+# Merge green PRs that TARGET develop, the moment their checks complete.
+# GitHub reads check_suite-triggered workflows from the DEFAULT branch (main),
+# so this file lives on main but acts ONLY on PRs whose base is develop.
+# codecov + readthedocs checks are ignored (advisory). Fail-safe: if a merge
+# is blocked by branch policy the PR simply stays open.
+on:
+  check_suite:
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  call:
+    # This is a merge-bot, not itself a required status check — no
+    # branch-protection context rename needed.
+    uses: scitex-ai/.github/.github/workflows/auto-merge-to-develop.yml@main
+    secrets: inherit

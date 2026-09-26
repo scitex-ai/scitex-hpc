@@ -3,7 +3,7 @@ description: |
   [TOPIC] GPU model-serving leases
   [DETAILS] Hold scarce 80 GB GPU pairs persistently and run model replicas as
   srun --overlap steps without computing on the login node.
-tags: [scitex-hpc, gpu, model-serving, slurm]
+tags: [scitex-hpc-gpu-model-serving-leases, gpu, model-serving, slurm]
 ---
 
 # GPU model-serving leases

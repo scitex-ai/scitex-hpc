@@ -14,12 +14,14 @@
 
 <!-- scitex-badges:start -->
 <p align="center">
-  <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/v/scitex-hpc.svg" alt="PyPI"></a>
-  <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/pyversions/scitex-hpc.svg" alt="Python"></a>
-  <a href="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/test.yml"><img src="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
-  <a href="https://codecov.io/gh/ywatanabe1989/scitex-hpc"><img src="https://codecov.io/gh/ywatanabe1989/scitex-hpc/graph/badge.svg" alt="Coverage"></a>
-  <a href="https://scitex-hpc.readthedocs.io/en/latest/"><img src="https://readthedocs.org/projects/scitex-hpc/badge/?version=latest" alt="Docs"></a>
+  <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/v/scitex-hpc?label=pypi" alt="pypi"></a>
+  <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/pyversions/scitex-hpc?label=python" alt="python"></a>
+  <a href="https://scitex-hpc.readthedocs.io/en/latest/"><img src="https://img.shields.io/readthedocs/scitex-hpc?label=docs" alt="docs"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/license-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
+</p>
+<p align="center">
+  <a href="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ywatanabe1989/scitex-hpc/ci.yml?branch=develop&label=tests" alt="tests"></a>
+  <a href="https://codecov.io/gh/ywatanabe1989/scitex-hpc"><img src="https://img.shields.io/codecov/c/github/ywatanabe1989/scitex-hpc/develop?label=cov" alt="cov"></a>
 </p>
 <!-- scitex-badges:end -->
 
@@ -29,15 +31,9 @@
 
 | # | Problem | Solution |
 |---|---------|----------|
-| 1 | **Login nodes silently run compute** — sysadmins kill stray processes, jobs die unannounced | **Every command wrapped in `srun` / `sbatch`** via login-shell SSH so SLURM modules load correctly |
-| 2 | **Queue wait dominates iteration** for short multi-agent / dev workflows | **`Reservation.book(..., persistent=True)`** — book a node once, `exec()` many short commands inside the same allocation; SIGUSR1 trap auto-resubmits at walltime |
+| 1 | **Login nodes** silently run compute — sysadmins kill stray processes, jobs die unannounced | **`srun` / `sbatch`** wrap every command via login-shell SSH so SLURM modules load correctly |
+| 2 | **Queue wait** dominates iteration for short multi-agent / dev workflows | **`Reservation.book(..., persistent=True)`** — book a node once, `exec()` many short commands inside the same allocation; SIGUSR1 trap auto-resubmits at walltime |
 | 3 | **Per-cluster knob soup** (partition, cpus, time, mem) repeated in every job script | **`SCITEX_HPC_*` env overrides** + `JobConfig` defaults for spartan/sapphire — script once, deploy anywhere |
-
-## Installation
-
-```bash
-pip install scitex-hpc
-```
 
 ## Demo
 
@@ -60,6 +56,27 @@ graph LR
     Sync --> Local
 ```
 
+<sub><b>Figure 1.</b> Dispatch loop: the local CLI submits through the login node to compute nodes, and results sync back.</sub>
+
+## Installation
+
+```bash
+uv pip install "scitex-hpc[all]"
+```
+
+<details>
+<summary>Extras matrix</summary>
+
+| Extra | Contents | Use when |
+|---|---|---|
+| `all` | `dev` + `docs` + `fastmcp` | Full install (recommended) |
+| `dev` | `pytest`, `ruff`, `scitex-dev` | Developing scitex-hpc / running audits |
+| `docs` | `sphinx`, themes, `myst-parser` | Building the Sphinx docs |
+
+</details>
+
+<sub><b>Table 1.</b> Install extras: `all` for the full install, `dev` for development, `docs` for Sphinx builds.</sub>
+
 ## Architecture
 
 `scitex-hpc` is a thin client over the SLURM CLI (`squeue`, `sbatch`,
@@ -68,22 +85,17 @@ graph LR
 fleet-agnostic: it does not know about scitex-orochi or any specific
 HPC site beyond its config.
 
+```mermaid
+flowchart TB
+    User["User: CLI / Python API"] --> CLI["scitex_hpc._cli\nlease, sentinel, tunnel-supervisor, walltime, liveness, dev"]
+    CLI --> SLURM["Thin wrappers\nsqueue, sbatch, srun, salloc"]
+    SLURM --> Login["HPC login node"]
+    Login --> Compute["Compute / GPU nodes"]
+    CLI --> State["Job state + leases\n~/.scitex/hpc/runtime/ and leases/"]
+    CLI --> CFG["Site schema\n~/.scitex/hpc/config.yaml"]
 ```
-scitex_hpc/
-├── _cli/                       ← `scitex-hpc` Click commands
-│   ├── submit_sbatch.py        ← submit-sbatch verb
-│   ├── dispatch_srun.py        ← dispatch-srun verb
-│   ├── poll_job.py             ← poll-job verb
-│   ├── fetch_result.py         ← fetch-result verb
-│   └── sync_project.py         ← sync-project verb
-├── _slurm/                     ← thin wrappers over squeue / sbatch / srun / salloc
-├── _state/                     ← job-state cache (`~/.scitex/hpc/runtime/`)
-└── config/                     ← YAML schema for site config
 
-~/.scitex/hpc/                  ← user state (gitignored, host-specific)
-├── config.yaml                 ← partitions, walltimes, module loads, GPU types
-└── runtime/                    ← per-job caches, result-rsync metadata
-```
+<sub><b>Figure 2.</b> Request path from the CLI/Python API through the SLURM wrappers to the cluster; site config and job state live under ~/.scitex/hpc/.</sub>
 
 ## 1 Interfaces
 
@@ -164,6 +176,8 @@ Every `JobConfig` field has a `SCITEX_HPC_*` env-var override:
 | `remote_base` | `~/proj` | `SCITEX_HPC_REMOTE_BASE` |
 
 Resolution priority: explicit `JobConfig` field → env var → built-in default.
+
+<sub><b>Table 2.</b> Every `JobConfig` field and its `SCITEX_HPC_*` env-var override.</sub>
 
 ## Walltime auto-resubmit (`persistent=True`)
 

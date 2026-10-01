@@ -37,7 +37,13 @@ def jobs():
     SoC: scitex-hpc owns these specs and the command bodies they invoke;
     scitex-dev's manager owns aggregation, placement and installation.
     """
-    from scitex_dev.jobs import JobSpec
+    try:
+        from scitex_dev.jobs import JobSpec
+    except ImportError as exc:
+        raise ImportError(
+            "scitex-hpc periodic jobs need scitex-dev: "
+            'pip install "scitex-hpc[dev]"'
+        ) from exc
 
     return [
         JobSpec(

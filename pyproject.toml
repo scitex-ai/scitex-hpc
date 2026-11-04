@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scitex-hpc"
 version = "0.9.0"
-description = "Generic SLURM dispatch (srun, sbatch, sync, poll, fetch) for the SciTeX ecosystem — login nodes never run compute"
+description = "HPC batch dispatch across Slurm and Grid Engine, with persistent Slurm allocations for SciTeX"
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.9"
 authors = [{name = "Yusuke Watanabe", email = "ywatanabe@scitex.ai"}]
-keywords = ["scitex", "hpc", "slurm", "srun", "sbatch"]
+keywords = ["scitex", "hpc", "slurm", "grid-engine", "batch", "scheduler"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.0,<3",
     "scitex-config>=0.3.0",
     "scitex-ssh>=1.0.0",
+    "scitex-logging>=0.2.4",
 ]
 
 [project.optional-dependencies]

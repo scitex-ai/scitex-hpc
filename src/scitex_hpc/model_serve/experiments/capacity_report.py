@@ -10,6 +10,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import scitex_logging as slogging
+
 CAPACITY_LINE = re.compile(
     r"max_total_num_tokens=(?P<capacity>\d+).*?"
     r"max_running_requests=(?P<running>\d+).*?"
@@ -101,7 +103,7 @@ def main() -> int:
     server_info = None
     if args.server_url:
         server_info = fetch_json(args.server_url.rstrip("/") + "/get_server_info")
-    print(
+    slogging.getPlainConsole(__name__).emit(
         json.dumps(
             build_report(args.configured_context_tokens, startup, server_info),
             indent=2,

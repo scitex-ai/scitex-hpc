@@ -40,7 +40,9 @@ def mcp_start(dry_run: bool, yes: bool):
             "this.\n"
             f"{e}"
         ) from e
-    click.echo("Starting scitex-hpc MCP server (stdio)...")
+    import scitex_logging as slogging
+
+    slogging.getLogger(__name__).info("Starting scitex-hpc MCP server (stdio)")
     mcp_server.run()
 
 

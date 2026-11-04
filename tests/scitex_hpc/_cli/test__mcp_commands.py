@@ -24,10 +24,15 @@ the same guidance text on a path that runs for real.
 
 from __future__ import annotations
 
+import json
+import os
 import pathlib
-import tomllib
+import selectors
+import subprocess
+import sys
 
 import pytest
+import tomllib
 
 from scitex_hpc._cli import main
 
@@ -119,3 +124,48 @@ def test_install_guidance_warns_the_old_extra_fails_silently(argv, capsys):
     out = capsys.readouterr().out
     # Assert
     assert "installs nothing" in out
+
+
+def test_actual_cli_mcp_initialize_has_clean_protocol_stdout(tmp_path):
+    # Arrange
+    pytest.importorskip("fastmcp")
+    stderr = tmp_path / "stderr.log"
+    env = {**os.environ, "SCITEX_DIR": str(tmp_path / "scitex")}
+    with stderr.open("w") as error_log:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "scitex_hpc", "mcp", "start", "--yes"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=error_log,
+            env=env,
+            text=True,
+        )
+        try:
+            request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "scitex-hpc-test", "version": "1"},
+                },
+            }
+            # Act
+            process.stdin.write(json.dumps(request) + "\n")
+            process.stdin.flush()
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                if not selector.select(20):
+                    raise TimeoutError(stderr.read_text())
+                first_frame = process.stdout.readline()
+            frame = json.loads(first_frame)
+            # Assert
+            assert (
+                frame["id"] == 1
+                and frame["result"]["serverInfo"]["name"] == "scitex-hpc"
+            )
+        finally:
+            process.stdin.close()
+            process.terminate()
+            process.wait(timeout=10)

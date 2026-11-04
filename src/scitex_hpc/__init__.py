@@ -1,4 +1,7 @@
-"""scitex-hpc — generic SLURM dispatch for the SciTeX ecosystem.
+"""HPC batch dispatch and persistent Slurm allocations for SciTeX.
+
+``scheduler`` provides a scheduler-neutral single-node batch interface for
+Slurm and the TSUBAME Grid Engine dialect. The following compatibility exports remain Slurm-specific.
 
 Dispatch verbs exported from ``scitex_hpc``.
 
@@ -29,7 +32,8 @@ Defaults resolve via cascade — explicit ``JobConfig(...)``,
 (``hpc.defaults.*``), then cluster-agnostic fallbacks.
 Set your ``host`` / ``partition`` once in user config and forget.
 
-Login nodes never run compute — every command is wrapped in srun/sbatch.
+Scientific workloads belong on allocated compute nodes. Legacy dispatch uses
+srun/sbatch; scheduler-neutral batch work uses its configured scheduler.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ try:
     del _v, PackageNotFoundError
 except ImportError:  # pragma: no cover — only on ancient Pythons
     __version__ = "0.0.0+local"
+from . import scheduler
 from ._config import HPC_DEFAULTS, JobConfig
 from ._customer_policy import (
     AssociationPolicyEvidence,
@@ -62,6 +67,7 @@ from ._modules import detect_module_system, load_apptainer, module_load
 from ._reservation import Reservation
 from ._results import fetch_result, poll_job
 from ._sync import sync
+from .scheduler import compute_cancel, compute_plan, compute_status, compute_submit
 
 __all__ = [
     "__version__",
@@ -84,6 +90,11 @@ __all__ = [
     "sbatch",
     "srun",
     "sync",
+    "scheduler",
+    "compute_plan",
+    "compute_submit",
+    "compute_status",
+    "compute_cancel",
     "TresValue",
     "validate_customer_policy",
 ]

@@ -23,6 +23,7 @@ PKG = "scitex-hpc"
 
 
 COMMAND_CATEGORIES = [
+    ("Compute", ["compute"]),
     ("Leases", ["lease"]),
     ("CI runners", ["ci-runners"]),
     ("Login-node guard", ["sentinel"]),
@@ -139,6 +140,7 @@ def cli(ctx: click.Context, help_recursive: bool, as_json: bool) -> None:
 from ._apis import list_python_apis as _list_python_apis  # noqa: E402
 from ._ci_runners import ci_runners as _ci_runners_grp  # noqa: E402
 from ._completion import attach_shell_completion  # noqa: E402
+from ._compute import compute as _compute  # noqa: E402
 from ._deploy_audit import audit_deploys_cmd as _audit_deploys_cmd  # noqa: E402
 from ._deprecated_group import deprecated_alias_group  # noqa: E402
 from ._dev import dev as _dev_grp  # noqa: E402
@@ -165,6 +167,7 @@ cli.add_command(_liveness_grp)
 cli.add_command(_reservations_alias)
 cli.add_command(_list_python_apis)
 cli.add_command(_mcp_group)
+cli.add_command(_compute)
 
 # §13 (operator directive, doctrine 20_dev-commands.md): self-maintenance
 # surfaces mount under ONE `dev` group, so the top level reads as the domain

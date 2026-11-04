@@ -10,6 +10,8 @@ import statistics
 import time
 import urllib.request
 
+import scitex_logging as slogging
+
 
 def request_once(url: str, model: str, run: int) -> tuple[int, str, float]:
     stream = run % 2 == 0
@@ -63,7 +65,10 @@ def main() -> int:
     failures: list[str] = []
     latencies: list[float] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        futures = [pool.submit(request_once, url, args.model, run) for run in range(args.requests)]
+        futures = [
+            pool.submit(request_once, url, args.model, run)
+            for run in range(args.requests)
+        ]
         for future in concurrent.futures.as_completed(futures):
             try:
                 run, result, elapsed = future.result()
@@ -73,7 +78,7 @@ def main() -> int:
             except Exception as error:
                 failures.append(repr(error))
     for failure in failures:
-        print(f"FAIL {failure}")
+        slogging.getConsole(__name__).info(f"FAIL {failure}")
     latency_summary = "latency=unavailable"
     if latencies:
         latency_summary = (
@@ -81,7 +86,7 @@ def main() -> int:
             f"latency_p50={percentile(latencies, 0.50):.3f}s "
             f"latency_p95={percentile(latencies, 0.95):.3f}s"
         )
-    print(
+    slogging.getConsole(__name__).info(
         f"SUMMARY passed={args.requests - len(failures)} failed={len(failures)} "
         f"{latency_summary}"
     )

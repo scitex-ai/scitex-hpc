@@ -1,7 +1,7 @@
 ---
 name: scitex-hpc
 description: |
-  [WHAT] Generic SLURM dispatch + persistent reservations for the SciTeX
+  [WHAT] HPC batch dispatch plus persistent Slurm reservations for the SciTeX
   ecosystem — one-shot `srun`/`sbatch`/`sync`/`poll`/`fetch_result` plus a
   `Reservation` primitive that books a node once and runs many short commands
   inside the allocation via `srun --jobid --overlap`, cutting queue wait from
@@ -9,13 +9,14 @@ description: |
   [WHEN] Dispatching jobs to an HPC cluster from a laptop or login node —
   especially when iterating in tight loops, running multi-agent fleets, or
   doing jupyter-on-HPC where queue wait dominates wall time.
-  [HOW] `from scitex_hpc import srun, sbatch, Reservation`, or
+  [HOW] Scheduler-neutral batch jobs: `scitex_hpc.scheduler`; existing Slurm:
+  `from scitex_hpc import srun, sbatch, Reservation`, or
   `scitex-hpc <verb> ...`. Bastion-initiated SSH only; no persistent daemons.
 primary_interface: python
 interfaces:
   python: 3
   cli: 2
-  mcp: 0
+  mcp: 2
   skills: 1
   hook: 0
   http: 0
@@ -24,8 +25,11 @@ tags: [scitex-hpc]
 
 # scitex-hpc
 
-Generic SLURM dispatch + persistent reservations. Login nodes never run
-compute — every command is wrapped in `srun`/`sbatch` via a login-shell SSH.
+HPC batch dispatch and persistent Slurm reservations. For scheduler-neutral
+single-node batch work, read [19_scheduler-portability.md](19_scheduler-portability.md).
+It describes the implemented batch subset and explicitly unsupported capabilities.
+Existing Slurm operations continue to use `srun`/`sbatch`; computation belongs on
+allocated compute nodes.
 
 ## Two patterns
 
@@ -51,6 +55,7 @@ compute — every command is wrapped in `srun`/`sbatch` via a login-shell SSH.
 - [15_spartan-identity-access-traps.md](15_spartan-identity-access-traps.md) — why a multiplexed ssh session reads the PAST and makes a group revocation look like a "flap"; probing authoritatively (`ControlPath=none`, `getent group` over cached `id`); why losing a project group breaks shell init when `$HOME` dotdirs symlink into it; SLURM Account ≠ POSIX group
 - [17_verifying-a-fix-is-live.md](17_verifying-a-fix-is-live.md) — four ways a fix reads as applied and is not (declared-not-applied / applied-in-wrong-place / layers-disagree / doctrine-as-description); why applied-in-wrong-place needs a SECOND observer and destroys the signal; why a job log cannot testify about the launcher; merged ≠ deployed ≠ effective; why a flake rate is the wrong statistic for a compounding failure. **NOTE: the CI runners have NO container/overlay — 14's freshness section is the target design, not the deployment**
 - [18_gpu-model-serving-leases.md](18_gpu-model-serving-leases.md) — persistent 80 GB GPU-pair leases, one TP-group step with `srun --overlap`, and safe handoff
+- [19_scheduler-portability.md](19_scheduler-portability.md) — batch profiles, shared Python/CLI/MCP operations, explicit resource bundles and uncertain outcomes
 
 ### Meta (20+)
 - [20_env-vars.md](20_env-vars.md) — Environment variables (`SCITEX_HPC_*`)

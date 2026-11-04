@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import urllib.request
+
+import scitex_logging as slogging
 
 TOOL = {
     "type": "function",
@@ -60,7 +61,9 @@ def stream(url: str, payload: dict) -> None:
             chunk = json.loads(line[6:])
             parts = chunk["choices"][0].get("delta", {}).get("tool_calls") or []
             for part in parts:
-                call = calls.setdefault(part.get("index", 0), {"name": "", "arguments": ""})
+                call = calls.setdefault(
+                    part.get("index", 0), {"name": "", "arguments": ""}
+                )
                 function = part.get("function", {})
                 call["name"] += function.get("name") or ""
                 call["arguments"] += function.get("arguments") or ""
@@ -94,12 +97,16 @@ def main() -> int:
         for run in range(1, args.repetitions + 1):
             try:
                 check(url, payload)
-                print(f"PASS {mode} {run}/{args.repetitions}")
+                slogging.getConsole(__name__).info(
+                    f"PASS {mode} {run}/{args.repetitions}"
+                )
             except Exception as error:  # report every repetition, then fail once
                 message = f"FAIL {mode} {run}/{args.repetitions}: {error}"
-                print(message, file=sys.stderr)
+                slogging.getLogger(__name__).error(message)
                 failures.append(message)
-    print(f"SUMMARY passed={2 * args.repetitions - len(failures)} failed={len(failures)}")
+    slogging.getConsole(__name__).info(
+        f"SUMMARY passed={2 * args.repetitions - len(failures)} failed={len(failures)}"
+    )
     return bool(failures)
 
 

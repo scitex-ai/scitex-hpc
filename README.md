@@ -16,8 +16,8 @@
 <p align="center">
   <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/v/scitex-hpc.svg" alt="PyPI"></a>
   <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/pyversions/scitex-hpc.svg" alt="Python"></a>
-  <a href="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/test.yml"><img src="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
-  <a href="https://codecov.io/gh/ywatanabe1989/scitex-hpc"><img src="https://codecov.io/gh/ywatanabe1989/scitex-hpc/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/scitex-ai/scitex-hpc/actions/workflows/ci.yml"><img src="https://github.com/scitex-ai/scitex-hpc/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
+  <a href="https://codecov.io/gh/scitex-ai/scitex-hpc"><img src="https://codecov.io/gh/scitex-ai/scitex-hpc/graph/badge.svg" alt="Coverage"></a>
   <a href="https://scitex-hpc.readthedocs.io/en/latest/"><img src="https://readthedocs.org/projects/scitex-hpc/badge/?version=latest" alt="Docs"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/license-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
 </p>
@@ -37,6 +37,14 @@
 
 ```bash
 pip install scitex-hpc
+```
+
+The scheduler examples below require `scitex_hpc.scheduler`. Older published
+packages do not include this interface. To use the current source before its
+next release, run this from a checkout of this repository:
+
+```bash
+uv pip install -e '.[all]'
 ```
 
 ## Quick Start

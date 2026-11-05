@@ -42,6 +42,9 @@ follows [SemVer](https://semver.org/).
   (pytest, ruff) and `docs` (six sphinx packages).
 
 ### Added
+- Shared single-node batch operations for Slurm and TSUBAME Grid Engine through
+  explicit host profiles, Python, CLI and MCP. Live site admission and interactive
+  Grid Engine allocations require separate qualification.
 - **`scitex-hpc liveness check-heartbeat`** — the same instrument shape for the
   *other* class of thing we run: a bare loop on a node, holding a lockfile
   and appending to a log on a fixed cadence. `liveness check` cannot see

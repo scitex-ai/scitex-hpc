@@ -52,8 +52,8 @@ docs = [
 all = ["scitex-hpc[dev,docs]", "fastmcp>=0.1.0"]
 
 [project.urls]
-Homepage = "https://github.com/ywatanabe1989/scitex-hpc"
-Repository = "https://github.com/ywatanabe1989/scitex-hpc"
+Homepage = "https://github.com/scitex-ai/scitex-hpc"
+Repository = "https://github.com/scitex-ai/scitex-hpc"
 Documentation = "https://scitex-hpc.readthedocs.io"
 
 [project.entry-points."scitex_dev.skills"]

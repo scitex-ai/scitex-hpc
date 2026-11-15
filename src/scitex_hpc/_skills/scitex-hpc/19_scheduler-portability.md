@@ -115,7 +115,7 @@ substituting that prefix; no umbrella version is assumed here.
 
 ## Slurm accounting records
 
-Slurm status requires one accounting row matching the allocation's native ID.
+Interpreting Slurm accounting requires one row matching the allocation's native ID.
 Multiple matching rows, a blank state or an incomplete row produce `unknown`
 with no exit code; the first row alone cannot establish success. Unrelated job
 IDs and step entries do not certify the parent allocation's state.

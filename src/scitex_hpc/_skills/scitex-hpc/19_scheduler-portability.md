@@ -117,6 +117,13 @@ substituting that prefix; no umbrella version is assumed here.
 
 - Query/transport/parse failures, missing exit evidence, and delayed accounting
   produce `unknown`, never successful completion or proof an agent is dead.
+- Grid Engine status requires one matching batch accounting record. Multiple
+  matching records or a parallel-task `pe_taskid` other than `NONE` produce
+  `unknown`; record order does not establish completion of the parent job.
+  `_states.grid_engine_accounting` owns this interpretation, with offline
+  parser/client controls in `tests/scitex_hpc/scheduler/test__states.py` and
+  `tests/scitex_hpc/scheduler/test__client.py`. These do not establish live-site
+  accounting behavior or support for arrays/MPI.
 - A lost submission response, signal-terminated SSH process, or unrecognized returned ID may mean the job was
   accepted. `SubmissionError` retains the correlation name and outcome. Reconcile
   with the scheduler before another submission; the client never auto-retries.

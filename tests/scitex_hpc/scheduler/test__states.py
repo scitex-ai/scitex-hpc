@@ -129,3 +129,38 @@ def test_another_job_or_step_does_not_establish_parent_success(parse, text):
     result = parse(text, target)
     # Assert
     assert result is None or result.state == JobState.UNKNOWN
+
+
+def _accounting_record(job="123", *, pe_task="NONE", failed=0, exit_status=0):
+    return (
+        f"jobnumber {job}\nfailed {failed}\nexit_status {exit_status}\n"
+        f"taskid undefined\npe_taskid {pe_task}\n"
+    )
+
+
+_MASTER = _accounting_record()
+_SLAVE = _accounting_record(pe_task="1.compute-node")
+_FAILED_MASTER = _accounting_record(exit_status=1)
+_SEPARATOR = "========================================\n"
+
+
+@pytest.mark.parametrize("text,expected,exit_code", [
+    (_SLAVE, "unknown", None),
+    (_accounting_record(pe_task="1.compute-node", failed=37), "unknown", None),
+    (_MASTER + _SEPARATOR + _SLAVE, "unknown", None),
+    (_SLAVE + _SEPARATOR + _MASTER, "unknown", None),
+    (_MASTER + _SEPARATOR + _FAILED_MASTER, "unknown", None),
+    (_FAILED_MASTER + _SEPARATOR + _MASTER, "unknown", None),
+    (_MASTER + _SEPARATOR + _MASTER, "unknown", None),
+    (_MASTER, "succeeded", 0),
+    (_FAILED_MASTER, "failed", 1),
+    (_MASTER + _SEPARATOR + _accounting_record("124", pe_task="1.other"), "succeeded", 0),
+    (_accounting_record("124", pe_task="1.other") + _SEPARATOR + _MASTER, "succeeded", 0),
+])
+def test_accounting_requires_one_supported_job_record(text, expected, exit_code):
+    # Arrange
+    target = "123"
+    # Act
+    result = grid_engine_accounting(text, target)
+    # Assert
+    assert (result.state, result.exit_code) == (expected, exit_code)

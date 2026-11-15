@@ -238,3 +238,25 @@ def test_signal_after_simulated_acceptance_preserves_unknown_outcome(tmp_path):
         observed = (exc.outcome, accepted.exists(), len(calls), codes)
     # Assert
     assert observed == ("unknown", True, 1, [143])
+
+
+@pytest.mark.parametrize("accounting", [
+    "jobnumber 123\nfailed 0\nexit_status 0\ntaskid undefined\npe_taskid worker.1",
+    "jobnumber 123\nfailed 0\nexit_status 0\ntaskid undefined\npe_taskid NONE\n"
+    "========================================\n"
+    "jobnumber 123\nfailed 0\nexit_status 0\ntaskid undefined\npe_taskid worker.1",
+    "jobnumber 123\nfailed 0\nexit_status 0\ntaskid undefined\npe_taskid NONE\n"
+    "========================================\n"
+    "jobnumber 123\nfailed 37\nexit_status 1\ntaskid undefined\npe_taskid NONE",
+    "jobnumber 123\nfailed 37\nexit_status 1\ntaskid undefined\npe_taskid NONE\n"
+    "========================================\n"
+    "jobnumber 123\nfailed 0\nexit_status 0\ntaskid undefined\npe_taskid NONE",
+])
+def test_ambiguous_accounting_does_not_certify_job_completion(accounting):
+    # Arrange
+    runner = Runner(Result("<job_info/>"), Result(accounting))
+    client = ComputeClient(profile("grid-engine"), runner=runner)
+    # Act
+    result = client.status(JobHandle("cluster", "grid-engine", "123"))
+    # Assert
+    assert (result.state, result.exit_code, len(runner.calls)) == ("unknown", None, 2)

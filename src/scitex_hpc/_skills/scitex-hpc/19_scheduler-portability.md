@@ -121,7 +121,7 @@ with no exit code; the first row alone cannot establish success. Unrelated job
 IDs and step entries do not certify the parent allocation's state.
 
 `_states.slurm_accounting` owns this interpretation. Offline parser and public
-client controls live in `tests/scitex_hpc/scheduler/test__slurm_accounting.py`;
+client controls live in `tests/scitex_hpc/scheduler/test__states.py`;
 they use an injected recording runner, with no actual cluster query or job.
 The [Slurm accounting reference](https://slurm.schedmd.com/sacct.html) describes
 multiple records, including resize records shown by default. This facade does

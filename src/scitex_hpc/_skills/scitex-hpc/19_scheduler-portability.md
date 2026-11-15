@@ -113,6 +113,20 @@ profile by name. MCP startup diagnostics use scitex-logging on stderr, preservin
 JSON-RPC stdout. Confirm an installed umbrella's `scitex hpc --help` routing before
 substituting that prefix; no umbrella version is assumed here.
 
+## Slurm accounting records
+
+Slurm status requires one accounting row matching the allocation's native ID.
+Multiple matching rows, a blank state or an incomplete row produce `unknown`
+with no exit code; the first row alone cannot establish success. Unrelated job
+IDs and step entries do not certify the parent allocation's state.
+
+`_states.slurm_accounting` owns this interpretation. Offline parser and public
+client controls live in `tests/scitex_hpc/scheduler/test__slurm_accounting.py`;
+they use an injected recording runner, with no actual cluster query or job.
+The [Slurm accounting reference](https://slurm.schedmd.com/sacct.html) describes
+multiple records, including resize records shown by default. This facade does
+not disambiguate those records by order or establish live-site behavior.
+
 ## Interpret uncertain outcomes conservatively
 
 - Query/transport/parse failures, missing exit evidence, and delayed accounting

@@ -36,29 +36,40 @@ def slurm_queue(text: str, job_id: str) -> JobStatus | None:
 
 
 def slurm_accounting(text: str, job_id: str) -> JobStatus:
+    matching = []
     for line in text.splitlines():
         fields = line.strip().split("|")
-        if len(fields) < 3 or fields[0] != job_id:
-            continue
-        native = fields[1].strip()
-        state = _SLURM.get(native.split()[0].rstrip("+"), JobState.UNKNOWN)
-        try:
-            exit_code, signal = (int(n) for n in fields[2].split(":"))
-            if exit_code < 0 or signal < 0:
-                raise ValueError
-        except (ValueError, TypeError):
-            return JobStatus(
-                JobState.UNKNOWN,
-                native,
-                reason="Accounting exit evidence is missing or invalid",
-            )
-        if state == JobState.SUCCEEDED and (exit_code or signal):
-            state = JobState.FAILED
-        return JobStatus(state, native, exit_code, f"signal={signal}")
-    return JobStatus(
-        JobState.UNKNOWN,
-        reason="No matching accounting record; completion is not established",
-    )
+        if fields[0] == job_id:
+            matching.append(fields)
+    if not matching:
+        return JobStatus(
+            JobState.UNKNOWN,
+            reason="No matching accounting record; completion is not established",
+        )
+    if len(matching) != 1:
+        return JobStatus(
+            JobState.UNKNOWN, reason="Multiple matching accounting records are ambiguous"
+        )
+    fields = matching[0]
+    if len(fields) < 3:
+        return JobStatus(JobState.UNKNOWN, reason="Accounting record is incomplete")
+    native = fields[1].strip()
+    if not native:
+        return JobStatus(JobState.UNKNOWN, reason="Accounting state evidence is missing")
+    state = _SLURM.get(native.split()[0].rstrip("+"), JobState.UNKNOWN)
+    try:
+        exit_code, signal = (int(n) for n in fields[2].split(":"))
+        if exit_code < 0 or signal < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return JobStatus(
+            JobState.UNKNOWN,
+            native,
+            reason="Accounting exit evidence is missing or invalid",
+        )
+    if state == JobState.SUCCEEDED and (exit_code or signal):
+        state = JobState.FAILED
+    return JobStatus(state, native, exit_code, f"signal={signal}")
 
 
 def grid_engine_queue(text: str, job_id: str) -> JobStatus | None:

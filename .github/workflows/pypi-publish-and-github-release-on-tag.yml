@@ -1,56 +1,30 @@
 name: release
 
-# Tag-driven release pipeline — SELF-HOSTED (Spartan CPU) via the scitex-ci SIF.
+# ============================================================================
+# CANONICAL RELEASE CALLER — the tag-driven release pipeline for a leaf repo.
+# Rendered from scitex-ai/.github workflow-templates/release.yml (HOSTED
+# variant: ubuntu-latest runners, setup-python build, pypa publish action).
+# Adjust only the ADJUST-marked lines.
 #
-# The intended operator flow is:
+# THE FILENAME IS LOAD-BEARING: PyPI trusted-publisher is registered per
+# filename, because PyPI validates the OIDC `job_workflow_ref` claim, which
+# names the TOP-LEVEL workflow file in THIS repo. Keep the publish job in
+# this top-level file (pypa README: "keep the job calling pypi-publish in a
+# top-level one"); a publish delegated to a cross-repo reusable fails
+# `invalid-publisher` for every repo (warehouse#11096 still open; full
+# working in scitex-ai/.github `.old/2026-08-12/WHY-THIS-IS-HERE.md`).
+# Adopting the gate requires ZERO trusted-publisher changes on pypi.org.
 #
-#     git tag vX.Y.Z && git push origin vX.Y.Z
+# THE RULING THIS ENFORCES (operator, 2026-08-11):
+#   「リリースのワークフローということですけれど、CI が通らないとマージ
+#     しちゃだめですよね。明らかに」
+#   — a release workflow must not merge unless CI passes. Obviously.
 #
-# Everything else fires automatically:
-#
-#   1. test          — matrix pytest INSIDE the SIF. Must pass or the pipeline
-#                      halts; nothing is published until tests are green on the
-#                      tagged commit.
-#   2. build         — wheel + sdist built INSIDE the SIF, uploaded as artifact.
-#   3. publish       — PyPI via MANUAL OIDC trusted publishing INSIDE the SIF.
-#   4. release       — GitHub Release with CHANGELOG notes + artifacts.
-#
-# develop→main promotion is a DELIBERATE, separate PR (operator policy);
-# this pipeline never auto-syncs main.
-#
-# WHY the SIF (operator standardization 2026-06-18, fleet canary 2026-06-21):
-# the Spartan compute runners have NO Python on the bare node, so the old
-# `actions/setup-python@v5` step failed at init ("version 3.x not found for
-# this OS"). The working pytest-matrix CI runs INSIDE the pre-built, reused
-# scitex-ci SIF (`apptainer exec ci-cpu.sif`), which bakes python 3.11/3.12/
-# 3.13 + pip + uv + fd at /opt/venv-<ver>. This release pipeline mirrors that:
-#   - test/build run `bash .github/ci/exec-in-sif.sh <inner>.sh <pyver>`.
-#   - publish CANNOT use pypa/gh-action-pypi-publish (a Docker action; the
-#     compute nodes have no Docker), so it does MANUAL OIDC trusted publishing
-#     inside the SIF (.github/ci/publish-in-sif.sh): GitHub OIDC JWT →
-#     PyPI mint-token → twine upload. Trust config on PyPI is unchanged.
-#   - actions/checkout, upload/download-artifact, codecov are JS actions and
-#     run fine on the self-hosted runner.
-# fail-loud: a missing SIF/shim/interpreter is a HARD error, never a
-# bare-runner fallback.
-#
-# runs-on: PINNED to spartan-cpu, deliberately NOT the pooled CI_RUNS_ON
-# variable that PR CI uses. These jobs apptainer-exec ci-cpu.sif, and that
-# SIF today exists only on the Spartan pool. The `scitex-ci` label is shared
-# with scitex-compute-01/02 (apptainer 1.5.3 present, ci-cpu.sif ABSENT), so
-# reading the pooled variable here would let a TAG land on a host that cannot
-# run the publish path — a failure that surfaces only at release time, long
-# after PR CI looks healthy, and that nobody is watching for when new runners
-# join the pool.
-#   Revert these four jobs to the pooled variable in one line once ci-cpu.sif
-#   exists at the destination. The fact to wait for is "the destination has
-#   ci-cpu.sif", NOT "the runners are up" — those are different facts and only
-#   the first makes this safe to unpin.
-# SIF + apptainer paths come from SCITEX_CI_SIF / SCITEX_CI_APPTAINER
-# (same as pytest-matrix).
-#
-# Manual re-run: the workflow also accepts a `version` input via
-# workflow_dispatch so you can re-publish without re-tagging.
+# THE ONE EDGE THAT MATTERS: `build: needs: promote`. `promote` is the org
+# reusable, which internally runs CI on the TAGGED commit and only then
+# merges develop -> main. So nothing here builds, publishes or releases
+# until CI is green on the exact commit being released.
+# ============================================================================
 
 on:
   push:
@@ -58,130 +32,197 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Tag to publish (e.g. v0.10.19) — must already exist on the repo'
+        description: 'Tag to publish (e.g. v0.1.0) — must already exist on the repo'
         required: true
         type: string
 
-env:
-  SCITEX_CI_APPTAINER: ${{ vars.SCITEX_CI_APPTAINER }}
-  SCITEX_CI_SIF: ${{ vars.SCITEX_CI_SIF }}
+permissions:
+  contents: read
 
 jobs:
-  test:
-    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            v="${GITHUB_REF#refs/tags/}"
-          else
-            v="${{ inputs.version }}"
-          fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.ver.outputs.version }}
-          fetch-depth: 0
-      # SIF-based self-hosted test run — mirrors pytest-matrix exactly. No
-      # setup-python (the bare Spartan node has no Python tool cache; that step
-      # failed "version not found for this OS"); no apt fd-install (fd is baked
-      # in the SIF). exec-in-sif.sh apptainer-execs the reused ci-cpu.sif and
-      # run-in-sif.sh layers THIS (tagged) checkout + [all,dev] into a writable
-      # target, then runs pytest. fail-loud on a missing SIF/shim.
-      - name: Run tests in the reused CI SIF (apptainer exec — deps layered, not on the bare runner)
-        run: bash .github/ci/exec-in-sif.sh run-in-sif.sh ${{ matrix.python-version }}
+  # --------------------------------------------------------------------------
+  # PROMOTE — CI on the tagged commit, then merge develop -> main with a MERGE
+  # commit. The CI gate lives INSIDE this reusable (`promote: needs: ci`).
+  # --------------------------------------------------------------------------
+  promote:
+    uses: scitex-ai/.github/.github/workflows/promote-develop-to-main-on-tag.yml@main
+    # The nested promote job opens/merges the develop->main PR: it requests
+    # contents:write + pull-requests:write, which fails startup against the
+    # file's top-level contents:read unless granted here (2026-10-18).
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      # ADJUST for a self-hosted/SIF repo: '["self-hosted","Linux","X64","scitex-ci"]'
+      runs-on-json: '["ubuntu-latest"]'
+      # ADJUST for a self-hosted/SIF repo: '["self-hosted","Linux","X64","spartan-cpu"]'
+      ci-runs-on-json: '["ubuntu-latest"]'
+      # Explicit tag: on workflow_dispatch GITHUB_REF is a branch, so the
+      # reusable cannot derive the tag from the ref (org #99). Push events
+      # pass ref_name (= the tag); dispatch passes inputs.version.
+      tag: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+    secrets:
+      # Named, not `inherit`. `inherit` forwards EVERY secret this repo holds
+      # into CI; pytest-matrix.yml's own header withdraws that advice.
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  # --------------------------------------------------------------------------
+  # BUILD — wheel + sdist from the tag. GATED on promote: this is the edge.
+  # --------------------------------------------------------------------------
   build:
-    needs: test
-    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
+    needs: promote
+    runs-on: ubuntu-latest   # ADJUST: self-hosted labels for a SIF repo
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
-      - name: Resolve version
+      - name: Resolve version from the triggering tag (or dispatch input)
         id: ver
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "push" ]; then
             v="${GITHUB_REF#refs/tags/}"
           else
             v="${{ inputs.version }}"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "resolved release tag: $v"
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.ver.outputs.version }}
-          fetch-depth: 0
-      # Build INSIDE the SIF (no setup-python on the bare Spartan node).
-      # build-in-sif.sh installs the `build` frontend into a writable --target
-      # inside the SIF, then `python -m build` → dist/. fail-loud on empty dist.
-      - name: Build wheel + sdist in the CI SIF (apptainer exec)
-        run: bash .github/ci/exec-in-sif.sh build-in-sif.sh 3.12
-      # upload-artifact is a JS action — runs fine on the self-hosted runner.
+          fetch-depth: 0   # full history + tags => setuptools-scm sees the tag
+
+      # ADJUST — hosted path below. SIF repos build inside the reused CI SIF
+      # (`bash .github/ci/exec-in-sif.sh build-in-sif.sh 3.12`) because the
+      # bare Spartan node has no Python and no Docker.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          python -m build
+          test -n "$(ls -A dist 2>/dev/null)" || { echo "::error::dist/ empty"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
+  # --------------------------------------------------------------------------
+  # PUBLISH — containment guard, THEN publish. Top-level by necessity (OIDC).
+  # --------------------------------------------------------------------------
   publish:
     needs: build
-    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
+    runs-on: ubuntu-latest   # ADJUST
+    timeout-minutes: 30
     environment:
       name: pypi
       url: https://pypi.org/p/scitex-hpc
-    # id-token: write is what populates ACTIONS_ID_TOKEN_REQUEST_{TOKEN,URL},
-    # which publish-in-sif.sh uses to mint the OIDC JWT. Keep it.
     permissions:
-      id-token: write
+      id-token: write   # OIDC: PyPI trusted publishing
+      contents: read
     steps:
-      # Need the repo checked out so .github/ci/exec-in-sif.sh +
-      # publish-in-sif.sh are on disk (the build job uploaded only dist/).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.version }}
+          fetch-depth: 0
+
+      # ---- THE CONTAINMENT GUARD (loud-fail; works under squash OR ff) ----
+      # A squash merge does not fail — it silently mints a NEW sha, so the
+      # tag's commit leaves main's history and setuptools-scm miscomputes the
+      # version. Repo settings can be changed and fail silently; this assert
+      # cannot. `promote` already merges with --merge; this is the backstop.
+      - name: Containment guard — the tag's commit MUST be contained in main
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.version }}"
+          git fetch --no-tags --prune origin main
+          TAG_SHA="$(git rev-list -n1 "refs/tags/${TAG}")"
+          echo "tag ${TAG} -> ${TAG_SHA}"
+          if git merge-base --is-ancestor "${TAG_SHA}" origin/main; then
+            echo "OK: ${TAG} (${TAG_SHA}) is an ancestor of origin/main."
+            echo "### release / containment guard — \`PASS\` (${{ github.repository }} @ ${TAG})" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::CONTAINMENT GUARD FAILED: tag ${TAG} commit ${TAG_SHA} is NOT an ancestor of origin/main. A squash merge likely rewrote the sha. ABORTING publish. Re-promote develop->main with a MERGE commit, then re-run."
+            echo "### release / containment guard — \`ABORT\` (${{ github.repository }} @ ${TAG})" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
-      # Manual OIDC trusted publishing INSIDE the SIF — pypa/gh-action-pypi-
-      # publish is a Docker action and the Spartan compute nodes have no Docker.
-      # publish-in-sif.sh: GitHub OIDC JWT (audience=pypi) → PyPI mint-token →
-      # twine upload dist/*. apptainer exec (no --cleanenv) passes the
-      # ACTIONS_ID_TOKEN_REQUEST_* env vars into the SIF. fail-loud at each step.
-      - name: Publish to PyPI via manual OIDC trusted publishing in the SIF
-        run: bash .github/ci/exec-in-sif.sh publish-in-sif.sh 3.12
 
+      # ADJUST — hosted path below. SIF repos do manual OIDC inside the SIF
+      # (the bare Spartan node has no Docker, so the pypa action cannot run
+      # there): `bash .github/ci/exec-in-sif.sh publish-in-sif.sh 3.12`.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # --------------------------------------------------------------------------
+  # RELEASE — GitHub Release from the tag, only after a successful publish.
+  # --------------------------------------------------------------------------
   release:
     needs: [build, publish]
-    runs-on: [self-hosted, Linux, X64, spartan-cpu]   # PINNED — see header
+    runs-on: ubuntu-latest   # ADJUST
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.build.outputs.version }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
       - name: Extract release notes from CHANGELOG.md
         run: |
+          set -euo pipefail
           VERSION="${{ needs.build.outputs.version }}"
           VERSION="${VERSION#v}"
-          awk -v v="$VERSION" '
-            $0 ~ "^## \\[" v "\\]" {p=1; next}
-            p && /^## \[/ {exit}
-            p
-          ' CHANGELOG.md > release-notes.md || true
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="$VERSION" '
+              $0 ~ "^## \\[" v "\\]" {p=1; next}
+              p && /^## \[/ {exit}
+              p
+            ' CHANGELOG.md > release-notes.md || true
+          fi
           if [ ! -s release-notes.md ]; then
-            echo "Release v${VERSION}. See CHANGELOG.md for details." > release-notes.md
+            echo "Release ${VERSION}. See CHANGELOG.md for details." > release-notes.md
           fi
       - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          name: ${{ needs.build.outputs.version }}
+          body_path: release-notes.md
+          files: dist/*
+          fail_on_unmatched_files: true
+
+  # --------------------------------------------------------------------------
+  # ACTOR FEEDBACK — one consolidated verdict for the tag pusher.
+  # --------------------------------------------------------------------------
+  report:
+    needs: [promote, build, publish, release]
+    if: always()
+    runs-on: ubuntu-latest   # ADJUST
+    steps:
+      - name: Consolidated verdict to github.actor
         run: |
-          gh release create "${{ needs.build.outputs.version }}" \
-            --title "${{ needs.build.outputs.version }}" \
-            --notes-file release-notes.md \
-            dist/*
+          set -euo pipefail
+          M="${{ needs.promote.result }}"; B="${{ needs.build.result }}"
+          P="${{ needs.publish.result }}"; R="${{ needs.release.result }}"
+          {
+            echo "## Release pipeline verdict — ${{ github.repository }} @ ${{ needs.build.outputs.version }}"
+            echo "- pusher: @${{ github.actor }}"
+            echo "- promote(ci+merge): \`$M\` · build: \`$B\` · publish: \`$P\` · release: \`$R\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$M" = "success" ] && [ "$B" = "success" ] && [ "$P" = "success" ] && [ "$R" = "success" ]; then
+            echo "release OK"
+          else
+            echo "::error::release pipeline FAILED for ${{ github.repository }} (promote=$M build=$B publish=$P release=$R) — see the failing stage above, @${{ github.actor }}."
+            exit 1
+          fi

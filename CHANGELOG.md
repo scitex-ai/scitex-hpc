@@ -6,6 +6,18 @@ follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-26
+
+First published release since 0.8.1 (v0.8.3 and v0.9.0 were tagged but their
+release runs failed or were cancelled on the pinned Spartan runner).
+
+### Fixed
+- Ship the owner CLI-audit dictionary (`scitex_hpc/_cli_audit_dict.yaml`, #127)
+  so `scitex hpc` passes audit-cli §1d when mounted under the scitex umbrella.
+- Release workflow: the canonical hosted caller (ubuntu-latest, CI gate inside
+  the org promote reusable, pypa trusted publishing) replaces the Spartan-pinned
+  SIF pipeline, whose jobs failed at checkout.
+
 ### Fixed
 - Canonical HPC runner registration now includes the organization-wide
   `scitex-org-cpu` eligibility label in addition to the existing

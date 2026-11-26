@@ -101,6 +101,9 @@ scitex_hpc = [
     # Extensionless on purpose: it is exec'd as a command, not sourced. No
     # type glob can catch it, which is exactly how it would be dropped again.
     "systemd_alarm/scitex-ci-alarm",
+    # Owner CLI-audit dictionary: read from the INSTALLED package when the
+    # CLI is mounted under the scitex umbrella (scitex-dev audit-cli §1d).
+    "_cli_audit_dict.yaml",
 ]
 
 [tool.pytest.ini_options]

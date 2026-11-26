@@ -1,0 +1,12 @@
+# scitex-hpc — CLI auditor owner dictionary (scitex-dev audit-cli §1d).
+#
+# Shipped IN the package: when `scitex hpc ...` is mounted under another
+# CLI (the scitex umbrella), the auditor classifies the mounted tokens with
+# the OWNER's installed dictionary (`<pkg>/_cli_audit_dict.yaml`, verified
+# against RECORD), never the mounting project's. Keep in sync with
+# .scitex/dev/cli-audit-dict.yaml (the repo-tree layer).
+nouns:
+  # The package's own group token as mounted (`scitex hpc`): an
+  # abbreviation (high-performance computing), absent from Moby POS.
+  - hpc
+  - walltime

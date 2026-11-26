@@ -2,4 +2,5 @@
 # (§1d, unrecognized-noun check). Additive only: never reclassifies or
 # overrides the canonical catalog.
 nouns:
+  - hpc
   - walltime

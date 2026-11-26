@@ -240,3 +240,8 @@ def load_apptainer(version: str | None = "1.3.3") -> dict:
     from .._modules import load_apptainer as _load
 
     return {"path": str(_load(version=version))}
+
+
+from ._compute import register_compute_tools  # noqa: E402
+
+register_compute_tools(mcp)

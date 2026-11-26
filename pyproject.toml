@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scitex-hpc"
-version = "0.9.0"
-description = "Generic SLURM dispatch (srun, sbatch, sync, poll, fetch) for the SciTeX ecosystem — login nodes never run compute"
+version = "0.9.1"
+description = "HPC batch dispatch across Slurm and Grid Engine, with persistent Slurm allocations for SciTeX"
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.9"
 authors = [{name = "Yusuke Watanabe", email = "ywatanabe@scitex.ai"}]
-keywords = ["scitex", "hpc", "slurm", "srun", "sbatch"]
+keywords = ["scitex", "hpc", "slurm", "grid-engine", "batch", "scheduler"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.0,<3",
     "scitex-config>=0.3.0",
     "scitex-ssh>=1.0.0",
+    "scitex-logging>=0.2.4",
 ]
 
 [project.optional-dependencies]
@@ -51,8 +52,8 @@ docs = [
 all = ["scitex-hpc[dev,docs]", "fastmcp>=0.1.0"]
 
 [project.urls]
-Homepage = "https://github.com/ywatanabe1989/scitex-hpc"
-Repository = "https://github.com/ywatanabe1989/scitex-hpc"
+Homepage = "https://github.com/scitex-ai/scitex-hpc"
+Repository = "https://github.com/scitex-ai/scitex-hpc"
 Documentation = "https://scitex-hpc.readthedocs.io"
 
 [project.entry-points."scitex_dev.skills"]
@@ -100,6 +101,9 @@ scitex_hpc = [
     # Extensionless on purpose: it is exec'd as a command, not sourced. No
     # type glob can catch it, which is exactly how it would be dropped again.
     "systemd_alarm/scitex-ci-alarm",
+    # Owner CLI-audit dictionary: read from the INSTALLED package when the
+    # CLI is mounted under the scitex umbrella (scitex-dev audit-cli §1d).
+    "_cli_audit_dict.yaml",
 ]
 
 [tool.pytest.ini_options]

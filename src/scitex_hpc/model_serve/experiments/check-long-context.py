@@ -8,6 +8,8 @@ import json
 import time
 import urllib.request
 
+import scitex_logging as slogging
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -42,7 +44,7 @@ def main() -> int:
     prompt_tokens = body["usage"]["prompt_tokens"]
     content = body["choices"][0]["message"].get("content")
     passed = prompt_tokens > args.minimum_prompt_tokens and bool(content)
-    print(
+    slogging.getConsole(__name__).info(
         f"SUMMARY passed={passed} prompt_tokens={prompt_tokens} "
         f"minimum_exclusive={args.minimum_prompt_tokens} elapsed={elapsed:.2f}s "
         f"content={content!r}"

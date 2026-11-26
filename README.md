@@ -6,7 +6,7 @@
   </a>
 </p>
 
-<p align="center"><b>Generic SLURM dispatch — `srun` / `sbatch` / reservations / sync / poll / fetch — for any HPC cluster.</b></p>
+<p align="center"><b>HPC batch dispatch across Slurm and TSUBAME Grid Engine, with persistent Slurm allocations.</b></p>
 
 <p align="center">
   <a href="https://scitex-hpc.readthedocs.io/">Full Documentation</a> · <code>uv pip install scitex-hpc[all]</code>
@@ -16,8 +16,8 @@
 <p align="center">
   <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/v/scitex-hpc.svg" alt="PyPI"></a>
   <a href="https://pypi.org/project/scitex-hpc/"><img src="https://img.shields.io/pypi/pyversions/scitex-hpc.svg" alt="Python"></a>
-  <a href="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/test.yml"><img src="https://github.com/ywatanabe1989/scitex-hpc/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
-  <a href="https://codecov.io/gh/ywatanabe1989/scitex-hpc"><img src="https://codecov.io/gh/ywatanabe1989/scitex-hpc/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/scitex-ai/scitex-hpc/actions/workflows/ci.yml"><img src="https://github.com/scitex-ai/scitex-hpc/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
+  <a href="https://codecov.io/gh/scitex-ai/scitex-hpc"><img src="https://codecov.io/gh/scitex-ai/scitex-hpc/graph/badge.svg" alt="Coverage"></a>
   <a href="https://scitex-hpc.readthedocs.io/en/latest/"><img src="https://readthedocs.org/projects/scitex-hpc/badge/?version=latest" alt="Docs"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/license-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
 </p>
@@ -29,9 +29,9 @@
 
 | # | Problem | Solution |
 |---|---------|----------|
-| 1 | **Login nodes silently run compute** — sysadmins kill stray processes, jobs die unannounced | **Every command wrapped in `srun` / `sbatch`** via login-shell SSH so SLURM modules load correctly |
+| 1 | **Login nodes silently run compute** — sysadmins kill stray processes, jobs die unannounced | Scheduler submissions place workloads on allocated compute nodes; login-shell SSH resolves the scheduler tools |
 | 2 | **Queue wait dominates iteration** for short multi-agent / dev workflows | **`Reservation.book(..., persistent=True)`** — book a node once, `exec()` many short commands inside the same allocation; SIGUSR1 trap auto-resubmits at walltime |
-| 3 | **Per-cluster knob soup** (partition, cpus, time, mem) repeated in every job script | **`SCITEX_HPC_*` env overrides** + `JobConfig` defaults for spartan/sapphire — script once, deploy anywhere |
+| 3 | **Per-cluster knob soup** (partition, cpus, time, mem) repeated in every job script | Explicit scheduler profiles and portable batch requests, alongside the existing `JobConfig` configuration cascade |
 
 ## Installation
 
@@ -39,51 +39,59 @@
 pip install scitex-hpc
 ```
 
-## Demo
+The scheduler examples below require `scitex_hpc.scheduler`. Older published
+packages do not include this interface. To use the current source before its
+next release, run this from a checkout of this repository:
 
 ```bash
-# Submit + watch a SLURM job (via the local scheduler config)
-scitex-hpc submit-sbatch examples/00_minimal.sbatch
-scitex-hpc poll-job <jobid>
-scitex-hpc fetch-result <jobid> --out ./results/
-
-# Or interactive: book a chunk, attach, work
-scitex-hpc dispatch-srun --time 1:00:00 --gpus 1
+uv pip install -e '.[all]'
 ```
 
-```mermaid
-graph LR
-    Local["Local laptop\n(scitex-hpc CLI / Python API)"] -->|submit-sbatch| Login["HPC login node"]
-    Local -->|dispatch-srun| Login
-    Login -->|salloc/sbatch| Compute["Compute / GPU nodes"]
-    Compute -->|stdout/err + artefacts| Sync["sync-project rsync"]
-    Sync --> Local
+## Quick Start
+
+The new `scitex_hpc.scheduler` interface provides `ComputeClient`,
+`BatchRequest`, explicit `HostProfile` configuration, dry-run plans,
+submission, conservative status interpretation, and cancellation for Slurm
+and the TSUBAME Grid Engine dialect. Python, CLI, and FastMCP adapters share the same operations.
+This is a single-node batch subset, not a claim of live site admission,
+interactive Grid Engine leases, MPI, arrays, renewal, or Web API serving.
+
+```python
+from scitex_hpc.scheduler import BatchRequest, ComputeClient, HostProfile
+
+client = ComputeClient(HostProfile(host="my-slurm-alias", scheduler="slurm"))
+request = BatchRequest(
+    argv=("python3", "analysis.py"),
+    working_directory="~/proj/my-project",
+    cpus=4,
+    memory_mib=4096,
+    walltime_seconds=60,
+)
+plan = client.plan(request)  # Pure planning: no SSH or cluster submission.
 ```
+
+Read the [scheduler portability guide](src/scitex_hpc/_skills/scitex-hpc/19_scheduler-portability.md)
+for profile examples, CLI commands, resource-bundle semantics, module setup,
+MCP operations, and uncertain submission outcomes. The same guide ships in the
+installed skills. Existing Slurm APIs and persistent leases remain available.
 
 ## Architecture
 
-`scitex-hpc` is a thin client over the SLURM CLI (`squeue`, `sbatch`,
-`srun`, `salloc`). Site-specific config lives in
-`~/.scitex/hpc/config.yaml`; nothing else is host-aware. The package is
-fleet-agnostic: it does not know about scitex-orochi or any specific
-HPC site beyond its config.
-
+```mermaid
+flowchart LR
+    API[Python / CLI / MCP] --> Client[Batch compute operations]
+    Profiles[Configured host profiles] --> Client
+    Client --> Slurm[Slurm]
+    Client --> Grid[TSUBAME Grid Engine]
+    Leases[Existing persistent leases] --> Slurm
+    Slurm --> Compute[Allocated compute nodes]
+    Grid --> Compute
 ```
-scitex_hpc/
-├── _cli/                       ← `scitex-hpc` Click commands
-│   ├── submit_sbatch.py        ← submit-sbatch verb
-│   ├── dispatch_srun.py        ← dispatch-srun verb
-│   ├── poll_job.py             ← poll-job verb
-│   ├── fetch_result.py         ← fetch-result verb
-│   └── sync_project.py         ← sync-project verb
-├── _slurm/                     ← thin wrappers over squeue / sbatch / srun / salloc
-├── _state/                     ← job-state cache (`~/.scitex/hpc/runtime/`)
-└── config/                     ← YAML schema for site config
 
-~/.scitex/hpc/                  ← user state (gitignored, host-specific)
-├── config.yaml                 ← partitions, walltimes, module loads, GPU types
-└── runtime/                    ← per-job caches, result-rsync metadata
-```
+Site settings belong in `~/.scitex/hpc/config.yaml` (relocatable through
+`SCITEX_DIR`). Named scheduler profiles reference SSH aliases and verified
+site resource mappings; they do not duplicate the Dev hosts registry or store
+credentials. Compute runs inside scheduler allocations, not on login nodes.
 
 ## 1 Interfaces
 

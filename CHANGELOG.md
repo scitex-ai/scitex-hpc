@@ -6,6 +6,18 @@ follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-26
+
+First published release since 0.8.1 (v0.8.3 and v0.9.0 were tagged but their
+release runs failed or were cancelled on the pinned Spartan runner).
+
+### Fixed
+- Ship the owner CLI-audit dictionary (`scitex_hpc/_cli_audit_dict.yaml`, #127)
+  so `scitex hpc` passes audit-cli §1d when mounted under the scitex umbrella.
+- Release workflow: the canonical hosted caller (ubuntu-latest, CI gate inside
+  the org promote reusable, pypa trusted publishing) replaces the Spartan-pinned
+  SIF pipeline, whose jobs failed at checkout.
+
 ### Fixed
 - Canonical HPC runner registration now includes the organization-wide
   `scitex-org-cpu` eligibility label in addition to the existing
@@ -42,6 +54,9 @@ follows [SemVer](https://semver.org/).
   (pytest, ruff) and `docs` (six sphinx packages).
 
 ### Added
+- Shared single-node batch operations for Slurm and TSUBAME Grid Engine through
+  explicit host profiles, Python, CLI and MCP. Live site admission and interactive
+  Grid Engine allocations require separate qualification.
 - **`scitex-hpc liveness check-heartbeat`** — the same instrument shape for the
   *other* class of thing we run: a bare loop on a node, holding a lockfile
   and appending to a log on a fixed cadence. `liveness check` cannot see

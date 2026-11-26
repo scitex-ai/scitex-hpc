@@ -15,6 +15,8 @@ than on a host months later.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from scitex_hpc import _packaging
 
 
@@ -75,3 +77,29 @@ def test_readme_files_are_not_treated_as_artifacts():
     assert markdown == []
 
 # EOF
+
+
+def test_owner_cli_audit_dictionary_is_package_data():
+    # Arrange -- the umbrella's audit-cli reads the mounted owner's
+    # dictionary from the installed package, so it must ship in the wheel.
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    # Act
+    globs = tomllib.loads(pyproject.read_text())["tool"]["setuptools"]["package-data"]["scitex_hpc"]
+    # Assert
+    assert "_cli_audit_dict.yaml" in globs
+
+
+def test_owner_cli_audit_dictionary_names_the_mounted_group_token():
+    # Arrange
+    import yaml
+
+    import scitex_hpc
+
+    resource = Path(scitex_hpc.__file__).parent / "_cli_audit_dict.yaml"
+    # Act
+    nouns = yaml.safe_load(resource.read_text())["nouns"]
+    # Assert
+    assert "hpc" in nouns
+

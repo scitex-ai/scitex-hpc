@@ -6,6 +6,8 @@ follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Configure subprocess coverage declaratively via coverage.py `patch = ["subprocess"]`; `tests/conftest.py` no longer writes `.pth` shims into site-packages or overwrites `COVERAGE_PROCESS_START` / `COVERAGE_FILE`.
+
 ## [0.9.1] - 2026-11-26
 
 First published release since 0.8.1 (v0.8.3 and v0.9.0 were tagged but their

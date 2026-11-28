@@ -6,6 +6,12 @@ follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- `install-shell-completion` no longer appends an `eval` line to `~/.bashrc` / `~/.zshrc`
+  (scitex-dev#1127). It writes a drop-in file the shell's completion framework scans
+  (`${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-~/.local/share}/bash-completion}/completions/scitex-hpc`,
+  zsh `site-functions/_scitex-hpc`, fish `completions/scitex-hpc.fish`), generates the script
+  in-process instead of running `scitex-hpc` from `PATH`, is idempotent and atomic, and refuses
+  to write into a git work tree. A leftover rc line from an older install is reported, never edited.
 - Configure subprocess coverage declaratively via coverage.py `patch = ["subprocess"]`; `tests/conftest.py` no longer writes `.pth` shims into site-packages or overwrites `COVERAGE_PROCESS_START` / `COVERAGE_FILE`.
 
 ## [0.9.1] - 2026-11-26

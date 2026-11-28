@@ -114,16 +114,24 @@ makes the CLI dangerous for agents that retry.
 
 ## Tab completion
 
-Click-driven completion isn't auto-active. Run once and reload:
+Click-driven completion isn't auto-active. Run once; it writes a drop-in
+file the shell's completion framework scans and **never edits a shell rc
+file** (`~/.bashrc` / `~/.zshrc` are often symlinks into a tracked dotfiles
+checkout):
 
 ```bash
-scitex-hpc install-shell-completion --shell bash   # → ~/.bashrc
-source ~/.bashrc
-
-# zsh / fish:
-scitex-hpc install-shell-completion --shell zsh    # → ~/.zshrc
+scitex-hpc install-shell-completion --shell bash   # → ~/.local/share/bash-completion/completions/scitex-hpc
+scitex-hpc install-shell-completion --shell zsh    # → ~/.local/share/zsh/site-functions/_scitex-hpc
 scitex-hpc install-shell-completion --shell fish   # → ~/.config/fish/completions/scitex-hpc.fish
 ```
+
+bash-completion (>= 2) loads the bash file on the first `<TAB>` in a new
+shell; fish loads its file automatically; zsh needs the directory on `fpath`
+before `compinit`. `$BASH_COMPLETION_USER_DIR`, `$XDG_DATA_HOME` and
+`$XDG_CONFIG_HOME` are honoured. The command is idempotent and refuses to
+write into a git work tree. Older versions appended
+`eval "$(_SCITEX_HPC_COMPLETE=bash_source scitex-hpc)"  # scitex-hpc tab completion`
+to the rc file; that line is no longer needed and can be deleted.
 
 `scitex-hpc print-shell-completion --shell SHELL` emits the script to
 stdout if you'd rather wire it in by hand.
